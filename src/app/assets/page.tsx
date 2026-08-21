@@ -4,10 +4,21 @@ import { createClient } from "@/lib/supabase/server";
 import { Header } from "@/components/header";
 import { DeleteAssetButton } from "@/components/delete-asset-button";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL, formatQuantity } from "@/lib/format";
+import { getHouseholdScope } from "@/lib/household";
 import { assetCurrentValue, CLASS_ORDER, type AssetRow } from "@/lib/portfolio";
 import { CLASS_COLOR } from "@/lib/chart-colors";
 import { deleteAsset } from "./actions";
+
+// linha da página: AssetRow + dono (visão casal). Ações de editar/excluir só
+// aparecem nos ativos do próprio usuário — o RLS bloqueia escrita nos do
+// parceiro.
+type PageAssetRow = AssetRow & {
+  user_id: string;
+  mine: boolean;
+  ownerName?: string;
+};
 
 function assetSubtitle(asset: AssetRow): string | null {
   const meta = asset.metadata ?? {};
@@ -60,7 +71,7 @@ function ActionLinks({ asset }: { asset: AssetRow }) {
 const thClass = "px-4 py-3 font-medium";
 const tdClass = "px-4 py-3";
 
-function ContaCorrenteTable({ assets }: { assets: AssetRow[] }) {
+function ContaCorrenteTable({ assets }: { assets: PageAssetRow[] }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -80,6 +91,9 @@ function ContaCorrenteTable({ assets }: { assets: AssetRow[] }) {
               <td className={tdClass}>
                 <div className="font-medium text-zinc-950 dark:text-zinc-50">{asset.name}</div>
                 {subtitle && <div className="text-xs text-zinc-500">{subtitle}</div>}
+                {asset.ownerName && (
+                  <div className="text-xs text-zinc-400">{asset.ownerName}</div>
+                )}
               </td>
               <td className={`${tdClass} text-right`}>
                 {yield_ ? (
@@ -96,7 +110,7 @@ function ContaCorrenteTable({ assets }: { assets: AssetRow[] }) {
                 {formatBRL(assetCurrentValue(asset))}
               </td>
               <td className={tdClass}>
-                <ActionLinks asset={asset} />
+                {asset.mine && <ActionLinks asset={asset} />}
               </td>
             </tr>
           );
@@ -106,7 +120,7 @@ function ContaCorrenteTable({ assets }: { assets: AssetRow[] }) {
   );
 }
 
-function MarketTable({ assets }: { assets: AssetRow[] }) {
+function MarketTable({ assets }: { assets: PageAssetRow[] }) {
   return (
     <table className="w-full text-sm">
       <thead>
@@ -128,6 +142,9 @@ function MarketTable({ assets }: { assets: AssetRow[] }) {
               <td className={tdClass}>
                 <div className="font-medium text-zinc-950 dark:text-zinc-50">{asset.name}</div>
                 {subtitle && <div className="text-xs text-zinc-500">{subtitle}</div>}
+                {asset.ownerName && (
+                  <div className="text-xs text-zinc-400">{asset.ownerName}</div>
+                )}
               </td>
               <td className={`${tdClass} text-right text-zinc-700 dark:text-zinc-300`}>
                 {formatQuantity(Number(asset.quantity))}
@@ -142,7 +159,7 @@ function MarketTable({ assets }: { assets: AssetRow[] }) {
                 {formatBRL(assetCurrentValue(asset))}
               </td>
               <td className={tdClass}>
-                <ActionLinks asset={asset} />
+                {asset.mine && <ActionLinks asset={asset} />}
               </td>
             </tr>
           );
@@ -152,7 +169,13 @@ function MarketTable({ assets }: { assets: AssetRow[] }) {
   );
 }
 
-export default async function AssetsPage() {
+export default async function AssetsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ visao?: string }>;
+}) {
+  const { visao } = await searchParams;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -165,15 +188,23 @@ export default async function AssetsPage() {
     .eq("id", user.id)
     .single();
 
+  const scope = await getHouseholdScope(supabase, user.id, visao);
+
   const { data } = await supabase
     .from("assets")
     .select(
-      "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
+      "id, user_id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
     )
-    .eq("user_id", user.id)
+    .in("user_id", scope.userIds)
     .order("quantity", { ascending: false });
 
-  const assets = (data ?? []) as unknown as AssetRow[];
+  const assets = ((data ?? []) as unknown as (AssetRow & { user_id: string })[]).map(
+    (a): PageAssetRow => ({
+      ...a,
+      mine: a.user_id === user.id,
+      ownerName: scope.casal ? scope.nameOf(a.user_id) : undefined,
+    }),
+  );
   const total = assets.reduce((sum, a) => sum + assetCurrentValue(a), 0);
 
   const groups = CLASS_ORDER.map((slug) => {
@@ -188,12 +219,12 @@ export default async function AssetsPage() {
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <Header userName={profile?.name ?? user.email ?? ""} />
+      <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
       <main className="w-full flex-1 space-y-6 px-6 py-8">
         <div className="flex items-end justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-              Meus ativos
+              {scope.casal ? "Ativos do casal" : "Meus ativos"}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
               {assets.length} ativo{assets.length === 1 ? "" : "s"} ·{" "}
@@ -202,12 +233,17 @@ export default async function AssetsPage() {
               </span>
             </p>
           </div>
-          <Link
-            href="/assets/new"
-            className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-          >
-            Adicionar ativo
-          </Link>
+          <div className="flex items-center gap-3">
+            {scope.canToggle && (
+              <ViewToggle basePath="/assets" casal={scope.casal} />
+            )}
+            <Link
+              href="/assets/new"
+              className="rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+            >
+              Adicionar ativo
+            </Link>
+          </div>
         </div>
 
         <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">

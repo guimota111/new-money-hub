@@ -2,12 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Header } from "@/components/header";
+import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL, formatQuantity } from "@/lib/format";
+import { getHouseholdScope } from "@/lib/household";
 
 const PAGE_SIZE = 50;
 
 interface MovementRow {
   id: string;
+  user_id: string;
   direction: "credito" | "debito";
   movement_type: string;
   ticker: string | null;
@@ -33,6 +36,7 @@ export default async function MovementsPage({
     de?: string;
     ate?: string;
     pagina?: string;
+    visao?: string;
   }>;
 }) {
   const filters = await searchParams;
@@ -50,21 +54,23 @@ export default async function MovementsPage({
     .eq("id", user.id)
     .single();
 
-  // opções dos selects (tipos e tickers distintos do usuário)
+  const scope = await getHouseholdScope(supabase, user.id, filters.visao);
+
+  // opções dos selects (tipos e tickers distintos da visão atual)
   const { data: allRows } = await supabase
     .from("movements")
     .select("movement_type, ticker")
-    .eq("user_id", user.id);
+    .in("user_id", scope.userIds);
   const types = [...new Set((allRows ?? []).map((r) => r.movement_type))].sort();
   const tickers = [...new Set((allRows ?? []).map((r) => r.ticker).filter(Boolean))].sort() as string[];
 
   let query = supabase
     .from("movements")
     .select(
-      "id, direction, movement_type, ticker, institution, quantity, unit_price, total_value, moved_at",
+      "id, user_id, direction, movement_type, ticker, institution, quantity, unit_price, total_value, moved_at",
       { count: "exact" },
     )
-    .eq("user_id", user.id);
+    .in("user_id", scope.userIds);
 
   if (filters.ticker) query = query.eq("ticker", filters.ticker);
   if (filters.tipo) query = query.eq("movement_type", filters.tipo);
@@ -90,6 +96,7 @@ export default async function MovementsPage({
   if (filters.direcao) baseParams.set("direcao", filters.direcao);
   if (filters.de) baseParams.set("de", filters.de);
   if (filters.ate) baseParams.set("ate", filters.ate);
+  if (scope.casal) baseParams.set("visao", "casal");
   const pageHref = (p: number) => {
     const params = new URLSearchParams(baseParams);
     params.set("pagina", String(p));
@@ -101,20 +108,26 @@ export default async function MovementsPage({
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <Header userName={profile?.name ?? user.email ?? ""} />
+      <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
       <main className="w-full flex-1 space-y-6 px-6 py-10">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Movimentações
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {total} registro{total === 1 ? "" : "s"}
-            {(filters.ticker || filters.tipo || filters.direcao || filters.de || filters.ate) &&
-              " com os filtros aplicados"}
-          </p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+              {scope.casal ? "Movimentações do casal" : "Movimentações"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              {total} registro{total === 1 ? "" : "s"}
+              {(filters.ticker || filters.tipo || filters.direcao || filters.de || filters.ate) &&
+                " com os filtros aplicados"}
+            </p>
+          </div>
+          {scope.canToggle && (
+            <ViewToggle basePath="/movements" params={filters} casal={scope.casal} />
+          )}
         </div>
 
         <form method="get" className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          {scope.casal && <input type="hidden" name="visao" value="casal" />}
           <div className="space-y-1">
             <label className="block text-xs font-medium text-zinc-500">Ticker</label>
             <select name="ticker" defaultValue={filters.ticker ?? ""} className={inputClass}>
@@ -155,7 +168,10 @@ export default async function MovementsPage({
           >
             Filtrar
           </button>
-          <Link href="/movements" className="text-sm text-zinc-500 underline">
+          <Link
+            href={scope.casal ? "/movements?visao=casal" : "/movements"}
+            className="text-sm text-zinc-500 underline"
+          >
             Limpar
           </Link>
         </form>
@@ -167,6 +183,7 @@ export default async function MovementsPage({
                 <th className="px-4 py-3 font-medium">Data</th>
                 <th className="px-4 py-3 font-medium">Tipo</th>
                 <th className="px-4 py-3 font-medium">Ticker</th>
+                {scope.casal && <th className="px-4 py-3 font-medium">Quem</th>}
                 <th className="px-4 py-3 text-right font-medium">Quantidade</th>
                 <th className="px-4 py-3 text-right font-medium">Preço unit.</th>
                 <th className="px-4 py-3 text-right font-medium">Valor</th>
@@ -175,7 +192,7 @@ export default async function MovementsPage({
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={scope.casal ? 7 : 6} className="px-4 py-8 text-center text-zinc-500">
                     Nenhuma movimentação encontrada.
                   </td>
                 </tr>
@@ -200,6 +217,9 @@ export default async function MovementsPage({
                   <td className="px-4 py-2.5 font-medium text-zinc-950 dark:text-zinc-50">
                     {m.ticker ?? "—"}
                   </td>
+                  {scope.casal && (
+                    <td className="px-4 py-2.5 text-zinc-500">{scope.nameOf(m.user_id)}</td>
+                  )}
                   <td className="px-4 py-2.5 text-right text-zinc-700 dark:text-zinc-300">
                     {m.quantity != null ? formatQuantity(Number(m.quantity)) : "—"}
                   </td>

@@ -3,13 +3,16 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Header } from "@/components/header";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { ViewToggle } from "@/components/view-toggle";
 import { INCOME_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
+import { getHouseholdScope } from "@/lib/household";
 
 const PAGE_SIZE = 50;
 
 interface IncomeRow {
   id: string;
+  user_id: string;
   amount: number | string;
   description: string | null;
   received_at: string;
@@ -31,6 +34,7 @@ export default async function IncomesPage({
     de?: string;
     ate?: string;
     pagina?: string;
+    visao?: string;
   }>;
 }) {
   const filters = await searchParams;
@@ -48,6 +52,8 @@ export default async function IncomesPage({
     .eq("id", user.id)
     .single();
 
+  const scope = await getHouseholdScope(supabase, user.id, filters.visao);
+
   const { data: categories } = await supabase
     .from("income_categories")
     .select("id, name, slug")
@@ -56,9 +62,9 @@ export default async function IncomesPage({
   let query = supabase
     .from("incomes")
     .select(
-      "id, amount, description, received_at, income_categories(name, slug), assets(name)",
+      "id, user_id, amount, description, received_at, income_categories(name, slug), assets(name)",
     )
-    .eq("user_id", user.id);
+    .in("user_id", scope.userIds);
 
   const selectedCategory = (categories ?? []).find((c) => c.slug === filters.categoria);
   if (selectedCategory) query = query.eq("income_category_id", selectedCategory.id);
@@ -98,6 +104,7 @@ export default async function IncomesPage({
   if (filters.busca) baseParams.set("busca", filters.busca);
   if (filters.de) baseParams.set("de", filters.de);
   if (filters.ate) baseParams.set("ate", filters.ate);
+  if (scope.casal) baseParams.set("visao", "casal");
   const pageHref = (p: number) => {
     const params = new URLSearchParams(baseParams);
     params.set("pagina", String(p));
@@ -109,21 +116,27 @@ export default async function IncomesPage({
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <Header userName={profile?.name ?? user.email ?? ""} />
+      <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
       <main className="w-full flex-1 space-y-6 px-6 py-10">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Receitas
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {all.length} lançamento{all.length === 1 ? "" : "s"} · Total:{" "}
-            <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-              {formatBRL(totalAmount)}
-            </span>
-          </p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+              {scope.casal ? "Receitas do casal" : "Receitas"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              {all.length} lançamento{all.length === 1 ? "" : "s"} · Total:{" "}
+              <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                {formatBRL(totalAmount)}
+              </span>
+            </p>
+          </div>
+          {scope.canToggle && (
+            <ViewToggle basePath="/incomes" params={filters} casal={scope.casal} />
+          )}
         </div>
 
         <form method="get" className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          {scope.casal && <input type="hidden" name="visao" value="casal" />}
           <div className="space-y-1">
             <label className="block text-xs font-medium text-zinc-500">Categoria</label>
             <select name="categoria" defaultValue={filters.categoria ?? ""} className={inputClass}>
@@ -156,7 +169,10 @@ export default async function IncomesPage({
           >
             Filtrar
           </button>
-          <Link href="/incomes" className="text-sm text-zinc-500 underline">
+          <Link
+            href={scope.casal ? "/incomes?visao=casal" : "/incomes"}
+            className="text-sm text-zinc-500 underline"
+          >
             Limpar
           </Link>
         </form>
@@ -175,13 +191,14 @@ export default async function IncomesPage({
                 <th className="px-4 py-3 font-medium">Data</th>
                 <th className="px-4 py-3 font-medium">Descrição</th>
                 <th className="px-4 py-3 font-medium">Categoria</th>
+                {scope.casal && <th className="px-4 py-3 font-medium">Quem</th>}
                 <th className="px-4 py-3 text-right font-medium">Valor</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={scope.casal ? 5 : 4} className="px-4 py-8 text-center text-zinc-500">
                     Nenhuma receita encontrada.
                   </td>
                 </tr>
@@ -197,6 +214,9 @@ export default async function IncomesPage({
                   <td className="px-4 py-2.5 text-zinc-700 dark:text-zinc-300">
                     {income.income_categories?.name ?? "—"}
                   </td>
+                  {scope.casal && (
+                    <td className="px-4 py-2.5 text-zinc-500">{scope.nameOf(income.user_id)}</td>
+                  )}
                   <td className="px-4 py-2.5 text-right font-medium text-emerald-700 dark:text-emerald-400">
                     {formatBRL(Number(income.amount))}
                   </td>

@@ -3,13 +3,16 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Header } from "@/components/header";
 import { DonutChart } from "@/components/charts/donut-chart";
+import { ViewToggle } from "@/components/view-toggle";
 import { EXPENSE_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
+import { getHouseholdScope } from "@/lib/household";
 
 const PAGE_SIZE = 50;
 
 interface ExpenseRow {
   id: string;
+  user_id: string;
   amount: number | string;
   description: string | null;
   spent_at: string;
@@ -31,6 +34,7 @@ export default async function ExpensesPage({
     de?: string;
     ate?: string;
     pagina?: string;
+    visao?: string;
   }>;
 }) {
   const filters = await searchParams;
@@ -48,6 +52,8 @@ export default async function ExpensesPage({
     .eq("id", user.id)
     .single();
 
+  const scope = await getHouseholdScope(supabase, user.id, filters.visao);
+
   const { data: categories } = await supabase
     .from("expense_categories")
     .select("id, name, slug")
@@ -55,8 +61,8 @@ export default async function ExpensesPage({
 
   let query = supabase
     .from("expenses")
-    .select("id, amount, description, spent_at, source, expense_categories(name, slug)")
-    .eq("user_id", user.id);
+    .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
+    .in("user_id", scope.userIds);
 
   const selectedCategory = (categories ?? []).find((c) => c.slug === filters.categoria);
   if (selectedCategory) query = query.eq("expense_category_id", selectedCategory.id);
@@ -93,6 +99,7 @@ export default async function ExpensesPage({
   if (filters.busca) baseParams.set("busca", filters.busca);
   if (filters.de) baseParams.set("de", filters.de);
   if (filters.ate) baseParams.set("ate", filters.ate);
+  if (scope.casal) baseParams.set("visao", "casal");
   const pageHref = (p: number) => {
     const params = new URLSearchParams(baseParams);
     params.set("pagina", String(p));
@@ -104,21 +111,27 @@ export default async function ExpensesPage({
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <Header userName={profile?.name ?? user.email ?? ""} />
+      <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
       <main className="w-full flex-1 space-y-6 px-6 py-10">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Despesas
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {all.length} lançamento{all.length === 1 ? "" : "s"} · Total:{" "}
-            <span className="font-semibold text-red-700 dark:text-red-400">
-              {formatBRL(totalAmount)}
-            </span>
-          </p>
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+              {scope.casal ? "Despesas do casal" : "Despesas"}
+            </h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              {all.length} lançamento{all.length === 1 ? "" : "s"} · Total:{" "}
+              <span className="font-semibold text-red-700 dark:text-red-400">
+                {formatBRL(totalAmount)}
+              </span>
+            </p>
+          </div>
+          {scope.canToggle && (
+            <ViewToggle basePath="/expenses" params={filters} casal={scope.casal} />
+          )}
         </div>
 
         <form method="get" className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          {scope.casal && <input type="hidden" name="visao" value="casal" />}
           <div className="space-y-1">
             <label className="block text-xs font-medium text-zinc-500">Categoria</label>
             <select name="categoria" defaultValue={filters.categoria ?? ""} className={inputClass}>
@@ -151,7 +164,10 @@ export default async function ExpensesPage({
           >
             Filtrar
           </button>
-          <Link href="/expenses" className="text-sm text-zinc-500 underline">
+          <Link
+            href={scope.casal ? "/expenses?visao=casal" : "/expenses"}
+            className="text-sm text-zinc-500 underline"
+          >
             Limpar
           </Link>
         </form>
@@ -171,13 +187,14 @@ export default async function ExpensesPage({
                 <th className="px-4 py-3 font-medium">Descrição</th>
                 <th className="px-4 py-3 font-medium">Categoria</th>
                 <th className="px-4 py-3 font-medium">Origem</th>
+                {scope.casal && <th className="px-4 py-3 font-medium">Quem</th>}
                 <th className="px-4 py-3 text-right font-medium">Valor</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={scope.casal ? 6 : 5} className="px-4 py-8 text-center text-zinc-500">
                     Nenhuma despesa encontrada.
                   </td>
                 </tr>
@@ -196,6 +213,9 @@ export default async function ExpensesPage({
                   <td className="px-4 py-2.5 text-zinc-500">
                     {expense.source === "pluggy" ? "Cartão Nubank" : "Manual"}
                   </td>
+                  {scope.casal && (
+                    <td className="px-4 py-2.5 text-zinc-500">{scope.nameOf(expense.user_id)}</td>
+                  )}
                   <td className="px-4 py-2.5 text-right font-medium text-red-700 dark:text-red-400">
                     {formatBRL(Number(expense.amount))}
                   </td>

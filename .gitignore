@@ -46,3 +46,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# extratos B3 exportados na raiz
+*.xlsx

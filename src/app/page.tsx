@@ -8,7 +8,9 @@ import {
   type IncomeCategoryInfo,
   type MonthlyIncomeRow,
 } from "@/components/charts/income-chart";
+import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL } from "@/lib/format";
+import { getHouseholdScope } from "@/lib/household";
 import { assetCurrentValue, CLASS_ORDER, type AssetRow } from "@/lib/portfolio";
 
 const MONTHS_SHOWN = 13;
@@ -23,7 +25,13 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ visao?: string }>;
+}) {
+  const { visao } = await searchParams;
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -36,13 +44,8 @@ export default async function Home() {
     .eq("id", user.id)
     .single();
 
-  const { data: membership } = await supabase
-    .from("household_members")
-    .select("household_id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (!membership) redirect("/onboarding");
+  const scope = await getHouseholdScope(supabase, user.id, visao);
+  if (!scope.hasHousehold) redirect("/onboarding");
 
   // ---- ativos + alocação --------------------------------------------------
   const { data: assetData } = await supabase
@@ -50,7 +53,7 @@ export default async function Home() {
     .select(
       "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
     )
-    .eq("user_id", user.id);
+    .in("user_id", scope.userIds);
   const assets = (assetData ?? []) as unknown as AssetRow[];
   const totalValue = assets.reduce((sum, a) => sum + assetCurrentValue(a), 0);
 
@@ -67,7 +70,7 @@ export default async function Home() {
   const { data: snapshotData } = await supabase
     .from("asset_snapshots")
     .select("snapshot_date, total_value, assets!inner(user_id)")
-    .eq("assets.user_id", user.id)
+    .in("assets.user_id", scope.userIds)
     .order("snapshot_date", { ascending: true });
   const byDate = new Map<string, number>();
   for (const s of snapshotData ?? []) {
@@ -86,7 +89,7 @@ export default async function Home() {
   const { data: incomeData } = await supabase
     .from("incomes")
     .select("amount, received_at, income_categories(name, slug)")
-    .eq("user_id", user.id)
+    .in("user_id", scope.userIds)
     .gte("received_at", sinceIso)
     .neq("income_categories.slug", "salario")
     .limit(5000);
@@ -122,8 +125,14 @@ export default async function Home() {
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <Header userName={profile?.name ?? user.email ?? ""} />
+      <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
       <main className="w-full flex-1 space-y-6 px-6 py-8">
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+            {scope.casal ? "Visão do casal" : "Visão geral"}
+          </h1>
+          {scope.canToggle && <ViewToggle basePath="/" casal={scope.casal} />}
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatTile
             label="Patrimônio total"
