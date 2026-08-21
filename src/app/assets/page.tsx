@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { DeleteAssetButton } from "@/components/delete-asset-button";
 import { DonutChart } from "@/components/charts/donut-chart";
@@ -177,9 +178,7 @@ export default async function AssetsPage({
   const { visao } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
   const [{ data: profile }, scope] = await Promise.all([

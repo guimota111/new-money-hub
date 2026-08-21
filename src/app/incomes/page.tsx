@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { DonutChart } from "@/components/charts/donut-chart";
 import { ViewToggle } from "@/components/view-toggle";
@@ -41,9 +42,7 @@ export default async function IncomesPage({
   const page = Math.max(1, Number(filters.pagina) || 1);
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
   const [{ data: profile }, scope, { data: categories }] = await Promise.all([

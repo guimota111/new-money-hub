@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/session";
 import { SubmitButton } from "@/components/submit-button";
 import { createHousehold, linkPartner } from "./actions";
 
 export default async function OnboardingPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
   const { data: membership } = await supabase

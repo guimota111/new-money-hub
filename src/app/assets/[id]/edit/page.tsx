@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { AssetForm } from "@/components/asset-form";
 import { updateAsset } from "../../actions";
@@ -16,9 +17,7 @@ export default async function EditAssetPage({
   const { error } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { AllocationBar } from "@/components/charts/allocation-bar";
 import { EvolutionChart, type EvolutionPoint } from "@/components/charts/evolution-chart";
@@ -33,9 +34,7 @@ export default async function Home({
   const { visao } = await searchParams;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
   const [{ data: profile }, scope] = await Promise.all([
