@@ -159,14 +159,19 @@ export async function GET(request: NextRequest) {
             !/credit card payment/i.test(t.category ?? ""),
         );
 
-        const { data: existingRows } = await admin
-          .from("expenses")
-          .select("external_id")
-          .eq("user_id", connection.user_id)
-          .eq("source", "pluggy")
-          .not("external_id", "is", null)
-          .limit(20000);
-        const known = new Set((existingRows ?? []).map((r) => r.external_id));
+        // pagina de 1000 em 1000 (teto de linhas por resposta do Supabase)
+        const known = new Set<string>();
+        for (let offset = 0; ; offset += 1000) {
+          const { data: existingRows } = await admin
+            .from("expenses")
+            .select("external_id")
+            .eq("user_id", connection.user_id)
+            .eq("source", "pluggy")
+            .not("external_id", "is", null)
+            .range(offset, offset + 999);
+          for (const row of existingRows ?? []) known.add(row.external_id);
+          if (!existingRows || existingRows.length < 1000) break;
+        }
 
         const newRows = spendable
           .filter((t) => !known.has(t.id))
@@ -182,13 +187,14 @@ export async function GET(request: NextRequest) {
           }));
 
         for (let i = 0; i < newRows.length; i += 500) {
-          const { error } = await admin.from("expenses").insert(newRows.slice(i, i + 500));
+          const batch = newRows.slice(i, i + 500);
+          const { error } = await admin.from("expenses").insert(batch);
           if (error) {
             summary.errors.push(`expenses: ${error.message}`);
             break;
           }
+          summary.expensesInserted += batch.length;
         }
-        summary.expensesInserted += newRows.length;
       }
     } catch (e) {
       summary.errors.push(
