@@ -2,6 +2,7 @@
 
 import { use, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { SubmitButton } from "@/components/submit-button";
 import { signIn, signUp } from "./actions";
 
 export default function LoginPage({
@@ -83,12 +84,12 @@ export default function LoginPage({
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
           </div>
-          <button
-            type="submit"
-            className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
+          <SubmitButton
+            pendingText={mode === "login" ? "Entrando..." : "Cadastrando..."}
+            className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
           >
             {mode === "login" ? "Entrar" : "Cadastrar"}
-          </button>
+          </SubmitButton>
         </form>
 
         <div className="flex items-center gap-3 text-xs text-zinc-400">

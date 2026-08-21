@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -14,16 +15,28 @@ export async function createHousehold(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: household, error } = await supabase
-    .from("households")
-    .insert({ name })
-    .select("id")
-    .single();
+  const { data: existingMembership } = await supabase
+    .from("household_members")
+    .select("household_id")
+    .eq("user_id", user!.id)
+    .limit(1)
+    .maybeSingle();
+  if (existingMembership) {
+    revalidatePath("/onboarding");
+    return;
+  }
+
+  // Gera o id no cliente para não depender de RETURNING: a policy de select
+  // de `households` só libera o registro depois que o usuário vira membro
+  // (segunda query abaixo), então pedir o id de volta no insert falharia.
+  const householdId = randomUUID();
+
+  const { error } = await supabase.from("households").insert({ id: householdId, name });
   if (error) throw new Error(error.message);
 
   const { error: memberError } = await supabase
     .from("household_members")
-    .insert({ household_id: household.id, user_id: user!.id, role: "owner" });
+    .insert({ household_id: householdId, user_id: user!.id, role: "owner" });
   if (memberError) throw new Error(memberError.message);
 
   revalidatePath("/onboarding");

@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env*.example
 
+# dados financeiros pessoais (extratos B3 etc.)
+excel/
+
 # vercel
 .vercel
 
