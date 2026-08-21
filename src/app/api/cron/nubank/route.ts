@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   pluggyAuth,
+  itemVisible,
   fetchAccounts,
   fetchInvestments,
   fetchAllTransactions,
@@ -61,14 +62,35 @@ export async function GET(request: NextRequest) {
     .select("id, user_id, item_id")
     .eq("provider", "pluggy");
 
-  let apiKey: string | null = null;
+  // pares de credenciais Pluggy: cada item só é visível para a aplicação que
+  // o criou, então tentamos cada aplicação configurada até achar a dona.
+  const apps = [
+    { clientId: process.env.PLUGGY_CLIENT_ID!, clientSecret: process.env.PLUGGY_CLIENT_SECRET! },
+    ...(process.env.PLUGGY_CLIENT_ID_2 && process.env.PLUGGY_CLIENT_SECRET_2
+      ? [{ clientId: process.env.PLUGGY_CLIENT_ID_2, clientSecret: process.env.PLUGGY_CLIENT_SECRET_2 }]
+      : []),
+  ];
+  const apiKeyCache = new Map<string, string>();
+  async function apiKeyForItem(itemId: string): Promise<string | null> {
+    for (const app of apps) {
+      let key = apiKeyCache.get(app.clientId);
+      if (!key) {
+        key = await pluggyAuth(app.clientId, app.clientSecret);
+        apiKeyCache.set(app.clientId, key);
+      }
+      if (await itemVisible(key, itemId)) return key;
+    }
+    return null;
+  }
+
   for (const connection of connections ?? []) {
     summary.connections++;
     try {
-      apiKey ??= await pluggyAuth(
-        process.env.PLUGGY_CLIENT_ID!,
-        process.env.PLUGGY_CLIENT_SECRET!,
-      );
+      const apiKey = await apiKeyForItem(connection.item_id);
+      if (!apiKey) {
+        summary.errors.push(`item ${connection.item_id}: não visível em nenhuma aplicação`);
+        continue;
+      }
 
       // ---- conta corrente --------------------------------------------------
       const accounts = await fetchAccounts(apiKey, connection.item_id);

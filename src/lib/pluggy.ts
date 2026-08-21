@@ -65,6 +65,16 @@ export async function createConnectToken(apiKey: string): Promise<string> {
   return data.accessToken;
 }
 
+// o item pertence à aplicação que o criou — usado para descobrir qual par de
+// credenciais enxerga cada conexão quando há mais de uma aplicação Pluggy
+export async function itemVisible(apiKey: string, itemId: string): Promise<boolean> {
+  const res = await fetch(`${BASE}/items/${itemId}`, {
+    headers: { "X-API-KEY": apiKey },
+    cache: "no-store",
+  });
+  return res.ok;
+}
+
 async function get(apiKey: string, path: string) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "X-API-KEY": apiKey },
