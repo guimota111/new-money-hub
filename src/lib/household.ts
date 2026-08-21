@@ -20,14 +20,15 @@ export async function getHouseholdScope(
   userId: string,
   visao: string | undefined,
 ): Promise<HouseholdScope> {
-  const { data: membership } = await supabase
+  // uma query só: a policy de select de household_members já devolve todas as
+  // linhas dos households do usuário, então dá para achar a membership e os
+  // demais membros de uma vez
+  const { data: rows } = await supabase
     .from("household_members")
-    .select("household_id")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
+    .select("household_id, user_id");
 
-  if (!membership) {
+  const mine = (rows ?? []).find((r) => r.user_id === userId);
+  if (!mine) {
     return {
       hasHousehold: false,
       casal: false,
@@ -37,22 +38,28 @@ export async function getHouseholdScope(
     };
   }
 
-  const { data: members } = await supabase
-    .from("household_members")
-    .select("user_id")
-    .eq("household_id", membership.household_id);
-  const memberIds = (members ?? []).map((m) => m.user_id as string);
-
-  // household_members não tem FK direta para profiles, então o nome vem em
-  // uma segunda query em vez de um embed do PostgREST.
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("id, name")
-    .in("id", memberIds);
-  const names = new Map((profiles ?? []).map((p) => [p.id as string, String(p.name)]));
+  const memberIds = [
+    ...new Set(
+      (rows ?? [])
+        .filter((r) => r.household_id === mine.household_id)
+        .map((r) => r.user_id as string),
+    ),
+  ];
 
   const canToggle = memberIds.length >= 2;
   const casal = visao === "casal" && canToggle;
+
+  // nomes só são exibidos na visão casal — evita a query no caso comum.
+  // household_members não tem FK direta para profiles, daí a query separada.
+  let names = new Map<string, string>();
+  if (casal) {
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", memberIds);
+    names = new Map((profiles ?? []).map((p) => [p.id as string, String(p.name)]));
+  }
+
   return {
     hasHousehold: true,
     casal,

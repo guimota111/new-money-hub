@@ -48,21 +48,10 @@ export default async function MovementsPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .single();
-
-  const scope = await getHouseholdScope(supabase, user.id, filters.visao);
-
-  // opções dos selects (tipos e tickers distintos da visão atual)
-  const { data: allRows } = await supabase
-    .from("movements")
-    .select("movement_type, ticker")
-    .in("user_id", scope.userIds);
-  const types = [...new Set((allRows ?? []).map((r) => r.movement_type))].sort();
-  const tickers = [...new Set((allRows ?? []).map((r) => r.ticker).filter(Boolean))].sort() as string[];
+  const [{ data: profile }, scope] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    getHouseholdScope(supabase, user.id, filters.visao),
+  ]);
 
   let query = supabase
     .from("movements")
@@ -81,10 +70,19 @@ export default async function MovementsPage({
   if (filters.ate) query = query.lte("moved_at", filters.ate);
 
   const from = (page - 1) * PAGE_SIZE;
-  const { data, count } = await query
-    .order("moved_at", { ascending: false })
-    .order("created_at", { ascending: false })
-    .range(from, from + PAGE_SIZE - 1);
+  // lista filtrada + opções dos selects (tipos e tickers) em paralelo
+  const [{ data, count }, { data: allRows }] = await Promise.all([
+    query
+      .order("moved_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1),
+    supabase
+      .from("movements")
+      .select("movement_type, ticker")
+      .in("user_id", scope.userIds),
+  ]);
+  const types = [...new Set((allRows ?? []).map((r) => r.movement_type))].sort();
+  const tickers = [...new Set((allRows ?? []).map((r) => r.ticker).filter(Boolean))].sort() as string[];
 
   const rows = (data ?? []) as unknown as MovementRow[];
   const total = count ?? 0;

@@ -38,22 +38,40 @@ export default async function Home({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .single();
-
-  const scope = await getHouseholdScope(supabase, user.id, visao);
+  const [{ data: profile }, scope] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    getHouseholdScope(supabase, user.id, visao),
+  ]);
   if (!scope.hasHousehold) redirect("/onboarding");
 
+  const since = new Date();
+  since.setMonth(since.getMonth() - MONTHS_SHOWN);
+  const sinceIso = since.toISOString().slice(0, 10);
+
+  // as três consultas são independentes — uma ida ao Supabase em paralelo
+  const [{ data: assetData }, { data: snapshotData }, { data: incomeData }] =
+    await Promise.all([
+      supabase
+        .from("assets")
+        .select(
+          "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
+        )
+        .in("user_id", scope.userIds),
+      supabase
+        .from("asset_snapshots")
+        .select("snapshot_date, total_value, assets!inner(user_id)")
+        .in("assets.user_id", scope.userIds)
+        .order("snapshot_date", { ascending: true }),
+      supabase
+        .from("incomes")
+        .select("amount, received_at, income_categories(name, slug)")
+        .in("user_id", scope.userIds)
+        .gte("received_at", sinceIso)
+        .neq("income_categories.slug", "salario")
+        .limit(5000),
+    ]);
+
   // ---- ativos + alocação --------------------------------------------------
-  const { data: assetData } = await supabase
-    .from("assets")
-    .select(
-      "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
-    )
-    .in("user_id", scope.userIds);
   const assets = (assetData ?? []) as unknown as AssetRow[];
   const totalValue = assets.reduce((sum, a) => sum + assetCurrentValue(a), 0);
 
@@ -67,11 +85,6 @@ export default async function Home({
   });
 
   // ---- evolução (snapshots somados por dia) -------------------------------
-  const { data: snapshotData } = await supabase
-    .from("asset_snapshots")
-    .select("snapshot_date, total_value, assets!inner(user_id)")
-    .in("assets.user_id", scope.userIds)
-    .order("snapshot_date", { ascending: true });
   const byDate = new Map<string, number>();
   for (const s of snapshotData ?? []) {
     byDate.set(s.snapshot_date, (byDate.get(s.snapshot_date) ?? 0) + Number(s.total_value));
@@ -82,18 +95,6 @@ export default async function Home({
   }));
 
   // ---- renda passiva mensal ----------------------------------------------
-  const since = new Date();
-  since.setMonth(since.getMonth() - MONTHS_SHOWN);
-  const sinceIso = since.toISOString().slice(0, 10);
-
-  const { data: incomeData } = await supabase
-    .from("incomes")
-    .select("amount, received_at, income_categories(name, slug)")
-    .in("user_id", scope.userIds)
-    .gte("received_at", sinceIso)
-    .neq("income_categories.slug", "salario")
-    .limit(5000);
-
   const monthly = new Map<string, Record<string, number>>();
   const categoriesSeen = new Map<string, string>();
   let passiveTotal12m = 0;

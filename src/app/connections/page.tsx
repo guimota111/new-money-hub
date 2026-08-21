@@ -18,16 +18,13 @@ export default async function ConnectionsPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .single();
-
-  const { data: connections } = await supabase
-    .from("bank_connections")
-    .select("id, label, item_id, created_at")
-    .order("created_at");
+  const [{ data: profile }, { data: connections }] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    supabase
+      .from("bank_connections")
+      .select("id, label, item_id, created_at")
+      .order("created_at"),
+  ]);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">

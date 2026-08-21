@@ -46,18 +46,11 @@ export default async function IncomesPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .single();
-
-  const scope = await getHouseholdScope(supabase, user.id, filters.visao);
-
-  const { data: categories } = await supabase
-    .from("income_categories")
-    .select("id, name, slug")
-    .order("name");
+  const [{ data: profile }, scope, { data: categories }] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    getHouseholdScope(supabase, user.id, filters.visao),
+    supabase.from("income_categories").select("id, name, slug").order("name"),
+  ]);
 
   let query = supabase
     .from("incomes")
