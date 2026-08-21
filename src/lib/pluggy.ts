@@ -52,6 +52,19 @@ export async function pluggyAuth(
   return data.apiKey;
 }
 
+// token de curta duração usado pelo widget Pluggy Connect no navegador
+export async function createConnectToken(apiKey: string): Promise<string> {
+  const res = await fetch(`${BASE}/connect_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-KEY": apiKey },
+    body: JSON.stringify({}),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`pluggy connect_token: ${res.status}`);
+  const data = await res.json();
+  return data.accessToken;
+}
+
 async function get(apiKey: string, path: string) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "X-API-KEY": apiKey },

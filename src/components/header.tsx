@@ -38,6 +38,12 @@ export function Header({ userName, view }: { userName: string; view?: "casal" })
           >
             Despesas
           </Link>
+          <Link
+            href="/connections"
+            className="text-sm text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50"
+          >
+            Conexões
+          </Link>
         </nav>
       </div>
       <div className="flex items-center gap-4">
