@@ -57,6 +57,43 @@ export async function GET(request: NextRequest) {
   const { data: categories } = await admin.from("expense_categories").select("id, slug").is("household_id", null);
   const categoryIdBySlug = Object.fromEntries((categories ?? []).map((c) => [c.slug, c.id]));
 
+  const { data: incomeCats } = await admin.from("income_categories").select("id, slug");
+  const rendaFixaCatId = (incomeCats ?? []).find((c) => c.slug === "rendimento_renda_fixa")?.id;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 7)}-01`;
+
+  // registra o rendimento novo de uma caixinha como receita: um lançamento
+  // por caixinha por mês, somando os deltas de cada sincronização
+  async function recordCaixinhaYield(userId: string, name: string, delta: number) {
+    if (!rendaFixaCatId) return;
+    const description = `${name} — rendimento`;
+    const { data: existing } = await admin
+      .from("incomes")
+      .select("id, amount")
+      .eq("user_id", userId)
+      .eq("source", "nubank_caixinha")
+      .eq("description", description)
+      .gte("received_at", monthStart)
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      await admin
+        .from("incomes")
+        .update({ amount: Number(existing.amount) + delta, received_at: today })
+        .eq("id", existing.id);
+    } else {
+      await admin.from("incomes").insert({
+        user_id: userId,
+        income_category_id: rendaFixaCatId,
+        amount: delta,
+        description,
+        received_at: today,
+        source: "nubank_caixinha",
+      });
+    }
+  }
+
   const { data: connections } = await admin
     .from("bank_connections")
     .select("id, user_id, item_id")
@@ -131,19 +168,42 @@ export async function GET(request: NextRequest) {
       for (const cdb of cdbs) {
         const { data: existing } = await admin
           .from("assets")
-          .select("id, metadata")
+          .select("id, name, metadata")
           .eq("user_id", connection.user_id)
           .eq("metadata->>pluggy_id", cdb.id)
           .limit(1)
           .maybeSingle();
 
+        // rendimento acumulado da caixinha (saldo - aplicado); o delta desde
+        // a última sincronização vira receita em rendimento_renda_fixa
+        const rendimentoTotal =
+          cdb.amountOriginal != null && cdb.balance > 0
+            ? Math.round((cdb.balance - cdb.amountOriginal) * 100) / 100
+            : null;
+
         if (existing) {
+          const prevMeta = existing.metadata as Record<string, unknown>;
+          const name = existing.name ?? caixinhaLabel(cdb.rate, cdb.rateType, cdb.dueDate);
+          const prevRendimento =
+            typeof prevMeta.rendimento_registrado === "number"
+              ? prevMeta.rendimento_registrado
+              : null;
+
+          if (rendimentoTotal != null && prevRendimento != null) {
+            const delta = Math.round((rendimentoTotal - prevRendimento) * 100) / 100;
+            if (delta >= 0.01) {
+              await recordCaixinhaYield(connection.user_id, name, delta);
+            }
+          }
+
           // preserva o nome (o usuário pode ter renomeado a caixinha)
           const metadata = {
-            ...(existing.metadata as Record<string, unknown>),
+            ...prevMeta,
             taxa_cdi: cdb.rate,
             vencimento: cdb.dueDate?.slice(0, 10) ?? null,
             valor_aplicado: cdb.amountOriginal,
+            // baseline: na primeira passada só registra, sem retroagir
+            rendimento_registrado: rendimentoTotal ?? prevMeta.rendimento_registrado ?? null,
           };
           await admin
             .from("assets")
@@ -163,6 +223,8 @@ export async function GET(request: NextRequest) {
               vencimento: cdb.dueDate?.slice(0, 10) ?? null,
               valor_aplicado: cdb.amountOriginal,
               pluggy_id: cdb.id,
+              // caixinha nova entra com o rendimento atual como baseline
+              rendimento_registrado: rendimentoTotal,
             },
           });
         }
