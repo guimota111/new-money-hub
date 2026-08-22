@@ -131,6 +131,8 @@ function MarketTable({ assets }: { assets: PageAssetRow[] }) {
           <th className={`${thClass} text-right`}>Preço médio</th>
           <th className={`${thClass} text-right`}>Cotação</th>
           <th className={`${thClass} text-right`}>Valor</th>
+          <th className={`${thClass} text-right`}>Resultado</th>
+          <th className={`${thClass} text-right`}>%</th>
           <th className={thClass} />
         </tr>
       </thead>
@@ -138,6 +140,20 @@ function MarketTable({ assets }: { assets: PageAssetRow[] }) {
         {assets.map((asset) => {
           const subtitle = assetSubtitle(asset);
           const price = asset.market_instruments?.current_price;
+          // resultado vs. preço médio pago — só quando há cotação e custo
+          const gain =
+            price != null && asset.average_price != null && Number(asset.average_price) > 0
+              ? {
+                  amount: (Number(price) - Number(asset.average_price)) * Number(asset.quantity),
+                  pct: (Number(price) / Number(asset.average_price) - 1) * 100,
+                }
+              : null;
+          const gainClass =
+            gain == null
+              ? "text-zinc-500"
+              : gain.amount >= 0
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-red-700 dark:text-red-400";
           return (
             <tr key={asset.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-900">
               <td className={tdClass}>
@@ -158,6 +174,12 @@ function MarketTable({ assets }: { assets: PageAssetRow[] }) {
               </td>
               <td className={`${tdClass} text-right font-medium text-zinc-950 dark:text-zinc-50`}>
                 {formatBRL(assetCurrentValue(asset))}
+              </td>
+              <td className={`${tdClass} text-right font-medium ${gainClass}`}>
+                {gain ? `${gain.amount >= 0 ? "+" : ""}${formatBRL(gain.amount)}` : "—"}
+              </td>
+              <td className={`${tdClass} text-right ${gainClass}`}>
+                {gain ? `${gain.pct >= 0 ? "+" : ""}${gain.pct.toFixed(1)}%` : "—"}
               </td>
               <td className={tdClass}>
                 {asset.mine && <ActionLinks asset={asset} />}

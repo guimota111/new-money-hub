@@ -85,10 +85,22 @@ export default async function MonthsPage({
     getHouseholdScope(supabase, user.id, filters.visao),
   ]);
 
+  // histórico: últimos 12 meses até o mês atual (independente do mês exibido)
+  const histLast = currentMonth();
+  const histFirst = shiftMonth(histLast, -11);
+  const histRange = { start: monthRange(histFirst).start, end: monthRange(histLast).end };
+  // cartão do 1º mês do histórico vem dos gastos do mês anterior a ele
+  const histCardStart = monthRange(shiftMonth(histFirst, -1)).start;
+
   // entradas do mês + saídas: gastos manuais do mês e fatura do cartão, que é
   // composta pelos gastos do mês anterior (pagos neste mês)
-  const [{ data: incomeData }, { data: manualData }, { data: cardData }] =
-    await Promise.all([
+  const [
+    { data: incomeData },
+    { data: manualData },
+    { data: cardData },
+    { data: histIncomeData },
+    { data: histExpenseData },
+  ] = await Promise.all([
       supabase
         .from("incomes")
         .select(
@@ -117,6 +129,20 @@ export default async function MonthsPage({
         .lte("spent_at", prev.end)
         .order("spent_at", { ascending: false })
         .limit(2000),
+      supabase
+        .from("incomes")
+        .select("amount, received_at")
+        .in("user_id", scope.userIds)
+        .gte("received_at", histRange.start)
+        .lte("received_at", histRange.end)
+        .limit(10000),
+      supabase
+        .from("expenses")
+        .select("amount, spent_at, source")
+        .in("user_id", scope.userIds)
+        .gte("spent_at", histCardStart)
+        .lte("spent_at", histRange.end)
+        .limit(10000),
     ]);
 
   const incomes = (incomeData ?? []) as unknown as IncomeRow[];
@@ -163,6 +189,23 @@ export default async function MonthsPage({
       color: EXPENSE_COLOR[slug] ?? "var(--chart-muted)",
     }))
     .sort((a, b) => slotIndex(a.color) - slotIndex(b.color));
+
+  // agrega o histórico por mês, com a fatura do cartão deslocada um mês
+  const history = Array.from({ length: 12 }, (_, i) => shiftMonth(histLast, i - 11)).map(
+    (m) => ({ mes: m, in: 0, out: 0 }),
+  );
+  const histIndex = new Map(history.map((h, i) => [h.mes, i]));
+  for (const row of histIncomeData ?? []) {
+    const idx = histIndex.get(String(row.received_at).slice(0, 7));
+    if (idx != null) history[idx].in += Number(row.amount);
+  }
+  for (const row of histExpenseData ?? []) {
+    const spentMonth = String(row.spent_at).slice(0, 7);
+    const billMonth = row.source === "pluggy" ? shiftMonth(spentMonth, 1) : spentMonth;
+    const idx = histIndex.get(billMonth);
+    if (idx != null) history[idx].out += Number(row.amount);
+  }
+  const histMax = Math.max(...history.map((h) => Math.max(h.in, h.out)), 1);
 
   const monthHref = (target: string) => {
     const params = new URLSearchParams({ mes: target });
@@ -346,6 +389,62 @@ export default async function MonthsPage({
             </details>
           </section>
         </div>
+
+        {/* histórico dos últimos 12 meses */}
+        <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+            Últimos 12 meses
+          </h2>
+          <div className="space-y-3">
+            {history.map((h) => {
+              const net = h.in - h.out;
+              return (
+                <div key={h.mes} className="flex items-center gap-3">
+                  <Link
+                    href={monthHref(h.mes)}
+                    className={`w-24 shrink-0 text-sm capitalize underline-offset-2 hover:underline ${
+                      h.mes === mes
+                        ? "font-semibold text-zinc-950 dark:text-zinc-50"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    {monthLabel(h.mes).replace(" de ", "/").slice(0, 8)}
+                  </Link>
+                  <div className="flex-1 space-y-1">
+                    <div className="h-3.5 overflow-hidden rounded-sm bg-zinc-100 dark:bg-zinc-900">
+                      <div
+                        className="h-full rounded-sm bg-emerald-600 dark:bg-emerald-500"
+                        style={{ width: `${(h.in / histMax) * 100}%` }}
+                        title={`Entradas: ${formatBRL(h.in)}`}
+                      />
+                    </div>
+                    <div className="h-3.5 overflow-hidden rounded-sm bg-zinc-100 dark:bg-zinc-900">
+                      <div
+                        className="h-full rounded-sm bg-red-600 dark:bg-red-500"
+                        style={{ width: `${(h.out / histMax) * 100}%` }}
+                        title={`Saídas: ${formatBRL(h.out)}`}
+                      />
+                    </div>
+                  </div>
+                  <div className="w-40 shrink-0 text-right text-xs">
+                    <div className="text-emerald-700 dark:text-emerald-400">{formatBRL(h.in)}</div>
+                    <div className="text-red-700 dark:text-red-400">{formatBRL(h.out)}</div>
+                  </div>
+                  <div
+                    className={`w-24 shrink-0 text-right text-sm font-medium ${
+                      net >= 0
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : "text-red-700 dark:text-red-400"
+                    }`}
+                  >
+                    {net >= 0 ? "+" : ""}
+                    {formatBRL(net)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </main>
     </div>
   );

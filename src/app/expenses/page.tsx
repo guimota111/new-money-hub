@@ -5,9 +5,11 @@ import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
+import { ManualEntryForm } from "@/components/manual-entry-form";
 import { EXPENSE_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { createExpense, deleteExpense } from "./actions";
 
 const PAGE_SIZE = 50;
 
@@ -122,6 +124,15 @@ export default async function ExpensesPage({
           )}
         </div>
 
+        <ManualEntryForm
+          action={createExpense}
+          categories={categories ?? []}
+          kind="despesa"
+          defaultDate={new Intl.DateTimeFormat("en-CA", {
+            timeZone: "America/Sao_Paulo",
+          }).format(new Date())}
+        />
+
         <form method="get" className="flex flex-wrap items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           {scope.casal && <input type="hidden" name="visao" value="casal" />}
           <div className="space-y-1">
@@ -181,12 +192,13 @@ export default async function ExpensesPage({
                 <th className="px-4 py-3 font-medium">Origem</th>
                 {scope.casal && <th className="px-4 py-3 font-medium">Quem</th>}
                 <th className="px-4 py-3 text-right font-medium">Valor</th>
+                <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={scope.casal ? 6 : 5} className="px-4 py-8 text-center text-zinc-500">
+                  <td colSpan={scope.casal ? 7 : 6} className="px-4 py-8 text-center text-zinc-500">
                     Nenhuma despesa encontrada.
                   </td>
                 </tr>
@@ -210,6 +222,19 @@ export default async function ExpensesPage({
                   )}
                   <td className="px-4 py-2.5 text-right font-medium text-red-700 dark:text-red-400">
                     {formatBRL(Number(expense.amount))}
+                  </td>
+                  <td className="px-2 py-2.5 text-right">
+                    {expense.source === "manual" && expense.user_id === user.id && (
+                      <form action={deleteExpense.bind(null, expense.id)}>
+                        <button
+                          type="submit"
+                          title="Excluir lançamento manual"
+                          className="text-zinc-400 hover:text-red-600 dark:hover:text-red-400"
+                        >
+                          ×
+                        </button>
+                      </form>
+                    )}
                   </td>
                 </tr>
               ))}
