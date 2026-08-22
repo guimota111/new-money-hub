@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -29,10 +30,19 @@ export async function signUp(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const supabase = await createClient();
 
+  // o link do e-mail de confirmação deve voltar para o ambiente onde o
+  // cadastro aconteceu (produção ou localhost), não para a Site URL fixa
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+
   const { error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { name } },
+    options: {
+      data: { name },
+      emailRedirectTo: `${proto}://${host}/auth/callback`,
+    },
   });
   if (error) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
