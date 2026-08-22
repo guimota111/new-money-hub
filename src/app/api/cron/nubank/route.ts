@@ -232,6 +232,19 @@ export async function GET(request: NextRequest) {
       }
 
       // ---- despesas do cartão ---------------------------------------------
+      // regras do usuário ("aplicar sempre") têm prioridade sobre a
+      // heurística de categoria da Pluggy; tabela pode não existir ainda
+      const ruleByMatcher = new Map<string, string>();
+      try {
+        const { data: rules } = await admin
+          .from("expense_category_rules")
+          .select("matcher, expense_category_id")
+          .eq("user_id", connection.user_id);
+        for (const r of rules ?? []) ruleByMatcher.set(r.matcher, r.expense_category_id);
+      } catch {
+        /* migração 0004 pendente */
+      }
+
       const creditAccounts = accounts.filter((a) => a.type === "CREDIT");
       for (const card of creditAccounts) {
         const transactions = await fetchAllTransactions(apiKey, card.id);
@@ -262,7 +275,9 @@ export async function GET(request: NextRequest) {
           .map((t) => ({
             user_id: connection.user_id,
             expense_category_id:
-              categoryIdBySlug[mapCategory(t.category)] ?? categoryIdBySlug["outros"],
+              ruleByMatcher.get(t.description.trim().toLowerCase()) ??
+              categoryIdBySlug[mapCategory(t.category)] ??
+              categoryIdBySlug["outros"],
             amount: t.amount,
             description: t.description,
             spent_at: t.date.slice(0, 10),

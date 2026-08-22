@@ -6,6 +6,7 @@ import { Header } from "@/components/header";
 import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
 import { ManualEntryForm } from "@/components/manual-entry-form";
+import { CategoryCell } from "@/components/category-cell";
 import { EXPENSE_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
@@ -20,6 +21,7 @@ interface ExpenseRow {
   description: string | null;
   spent_at: string;
   source: string;
+  expense_category_id: string | null;
   expense_categories: { name: string; slug: string } | null;
 }
 
@@ -55,7 +57,7 @@ export default async function ExpensesPage({
 
   let query = supabase
     .from("expenses")
-    .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
+    .select("id, user_id, amount, description, spent_at, source, expense_category_id, expense_categories(name, slug)")
     .in("user_id", scope.userIds);
 
   const selectedCategory = (categories ?? []).find((c) => c.slug === filters.categoria);
@@ -212,7 +214,14 @@ export default async function ExpensesPage({
                     {expense.description ?? "—"}
                   </td>
                   <td className="px-4 py-2.5 text-zinc-700 dark:text-zinc-300">
-                    {expense.expense_categories?.name ?? "—"}
+                    <CategoryCell
+                      expenseId={expense.id}
+                      currentId={expense.expense_category_id}
+                      currentName={expense.expense_categories?.name ?? null}
+                      categories={categories ?? []}
+                      canEdit={expense.user_id === user.id}
+                      hasDescription={!!expense.description}
+                    />
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500">
                     {expense.source === "pluggy" ? "Cartão Nubank" : "Manual"}
