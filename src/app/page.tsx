@@ -14,7 +14,7 @@ import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
 import { assetCurrentValue, CLASS_ORDER, type AssetRow } from "@/lib/portfolio";
 
-const MONTHS_SHOWN = 13;
+const MONTHS_SHOWN = 12;
 
 function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (

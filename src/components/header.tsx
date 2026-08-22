@@ -15,6 +15,12 @@ export function Header({ userName, view }: { userName: string; view?: "casal" })
         </Link>
         <nav className="flex items-center gap-4">
           <Link
+            href={`/months${suffix}`}
+            className="text-sm text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50"
+          >
+            Meses
+          </Link>
+          <Link
             href={`/assets${suffix}`}
             className="text-sm text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50"
           >

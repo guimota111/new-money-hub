@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
-import { DonutChart } from "@/components/charts/donut-chart";
+import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
 import { INCOME_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
@@ -173,7 +173,7 @@ export default async function IncomesPage({
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
             Por categoria (filtro atual)
           </h2>
-          <DonutChart centerLabel="Total" slices={slices} />
+          <CategoryPie totalLabel="Total" slices={slices} />
         </section>
 
         <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { DeleteAssetButton } from "@/components/delete-asset-button";
-import { DonutChart } from "@/components/charts/donut-chart";
+import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL, formatQuantity } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
@@ -246,8 +246,8 @@ export default async function AssetsPage({
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
             Divisão da carteira
           </h2>
-          <DonutChart
-            centerLabel="Total"
+          <CategoryPie
+            totalLabel="Total"
             slices={groups.map((g) => ({
               key: g.slug,
               name: g.name,

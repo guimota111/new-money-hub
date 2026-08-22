@@ -3,21 +3,59 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { formatBRL } from "@/lib/format";
 
-export interface DonutSlice {
+export interface PieSlice {
   key: string;
   name: string;
   value: number;
   color: string;
 }
 
-// Pizza (donut) com total no centro e legenda com valores — a legenda com
-// números é o "relief" exigido pelas cores de baixo contraste no modo claro.
-export function DonutChart({
-  slices,
-  centerLabel,
+const RADIAN = Math.PI / 180;
+
+// Percentual dentro da fatia — omitido em fatias < 6% (não cabe legível);
+// nesses casos o percentual continua disponível na legenda.
+function SliceLabel({
+  cx,
+  cy,
+  midAngle,
+  outerRadius,
+  percent,
 }: {
-  slices: DonutSlice[];
-  centerLabel?: string;
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  outerRadius?: number;
+  percent?: number;
+}) {
+  if (!percent || percent < 0.06) return null;
+  const r = (outerRadius ?? 0) * 0.62;
+  const x = (cx ?? 0) + r * Math.cos(-(midAngle ?? 0) * RADIAN);
+  const y = (cy ?? 0) + r * Math.sin(-(midAngle ?? 0) * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#ffffff"
+      fontSize={12}
+      fontWeight={600}
+      textAnchor="middle"
+      dominantBaseline="central"
+      style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.35)", strokeWidth: 2 }}
+    >
+      {(percent * 100).toFixed(0)}%
+    </text>
+  );
+}
+
+// Pizza fechada com percentuais nas fatias, total ao lado e legenda com
+// valores — a legenda com números é o "relief" exigido pelas cores de baixo
+// contraste no modo claro.
+export function CategoryPie({
+  slices,
+  totalLabel = "Total",
+}: {
+  slices: PieSlice[];
+  totalLabel?: string;
 }) {
   const visible = slices.filter((s) => s.value > 0);
   const total = visible.reduce((sum, s) => sum + s.value, 0);
@@ -27,20 +65,21 @@ export function DonutChart({
 
   return (
     <div className="flex flex-col items-center gap-8 lg:flex-row lg:items-center">
-      <div className="relative h-56 w-56 shrink-0">
+      <div className="h-56 w-56 shrink-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
               data={visible}
               dataKey="value"
               nameKey="name"
-              innerRadius="62%"
               outerRadius="100%"
               stroke="var(--chart-surface)"
               strokeWidth={2}
               startAngle={90}
               endAngle={-270}
               isAnimationActive={false}
+              label={SliceLabel}
+              labelLine={false}
             >
               {visible.map((s) => (
                 <Cell key={s.key} fill={s.color} />
@@ -57,12 +96,12 @@ export function DonutChart({
             />
           </PieChart>
         </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          {centerLabel && <span className="text-xs text-zinc-500">{centerLabel}</span>}
-          <span className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
-            {formatBRL(total)}
-          </span>
-        </div>
+      </div>
+      <div className="shrink-0 text-center lg:min-w-32 lg:text-left">
+        <p className="text-xs uppercase tracking-wide text-zinc-500">{totalLabel}</p>
+        <p className="mt-1 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
+          {formatBRL(total)}
+        </p>
       </div>
       <ul className="w-full space-y-2">
         {visible.map((s) => (
