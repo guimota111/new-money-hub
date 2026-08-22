@@ -6,6 +6,7 @@ import { Header } from "@/components/header";
 import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL, formatQuantity } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 const PAGE_SIZE = 50;
 
@@ -69,16 +70,21 @@ export default async function MovementsPage({
   if (filters.ate) query = query.lte("moved_at", filters.ate);
 
   const from = (page - 1) * PAGE_SIZE;
-  // lista filtrada + opções dos selects (tipos e tickers) em paralelo
-  const [{ data, count }, { data: allRows }] = await Promise.all([
+  // lista filtrada + opções dos selects (tipos e tickers) em paralelo;
+  // as opções paginam além do teto de 1000 linhas do PostgREST
+  const [{ data, count }, allRows] = await Promise.all([
     query
       .order("moved_at", { ascending: false })
       .order("created_at", { ascending: false })
       .range(from, from + PAGE_SIZE - 1),
-    supabase
-      .from("movements")
-      .select("movement_type, ticker")
-      .in("user_id", scope.userIds),
+    fetchAllRows((f, t) =>
+      supabase
+        .from("movements")
+        .select("movement_type, ticker")
+        .in("user_id", scope.userIds)
+        .order("id", { ascending: true })
+        .range(f, t),
+    ),
   ]);
   const types = [...new Set((allRows ?? []).map((r) => r.movement_type))].sort();
   const tickers = [...new Set((allRows ?? []).map((r) => r.ticker).filter(Boolean))].sort() as string[];

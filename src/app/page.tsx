@@ -13,6 +13,7 @@ import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
 import { assetCurrentValue, CLASS_ORDER, type AssetRow } from "@/lib/portfolio";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 const MONTHS_SHOWN = 12;
 
@@ -47,28 +48,36 @@ export default async function Home({
   since.setMonth(since.getMonth() - MONTHS_SHOWN);
   const sinceIso = since.toISOString().slice(0, 10);
 
-  // as três consultas são independentes — uma ida ao Supabase em paralelo
-  const [{ data: assetData }, { data: snapshotData }, { data: incomeData }] =
-    await Promise.all([
-      supabase
-        .from("assets")
-        .select(
-          "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
-        )
-        .in("user_id", scope.userIds),
+  // as três consultas são independentes — uma ida ao Supabase em paralelo;
+  // snapshots e incomes paginam além do teto de 1000 linhas do PostgREST
+  const [{ data: assetData }, snapshotData, incomeData] = await Promise.all([
+    supabase
+      .from("assets")
+      .select(
+        "id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
+      )
+      .in("user_id", scope.userIds),
+    fetchAllRows((from, to) =>
       supabase
         .from("asset_snapshots")
         .select("snapshot_date, total_value, assets!inner(user_id)")
         .in("assets.user_id", scope.userIds)
-        .order("snapshot_date", { ascending: true }),
+        .order("snapshot_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
       supabase
         .from("incomes")
         .select("amount, received_at, income_categories(name, slug)")
         .in("user_id", scope.userIds)
         .gte("received_at", sinceIso)
         .neq("income_categories.slug", "salario")
-        .limit(5000),
-    ]);
+        .order("received_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+  ]);
 
   // ---- ativos + alocação --------------------------------------------------
   const assets = (assetData ?? []) as unknown as AssetRow[];

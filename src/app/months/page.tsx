@@ -8,6 +8,7 @@ import { CategoryPie } from "@/components/charts/pie-chart";
 import { EXPENSE_COLOR, INCOME_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 interface IncomeRow {
   id: string;
@@ -93,56 +94,67 @@ export default async function MonthsPage({
   const histCardStart = monthRange(shiftMonth(histFirst, -1)).start;
 
   // entradas do mês + saídas: gastos manuais do mês e fatura do cartão, que é
-  // composta pelos gastos do mês anterior (pagos neste mês)
-  const [
-    { data: incomeData },
-    { data: manualData },
-    { data: cardData },
-    { data: histIncomeData },
-    { data: histExpenseData },
-  ] = await Promise.all([
-      supabase
-        .from("incomes")
-        .select(
-          "id, user_id, amount, description, received_at, income_categories(name, slug), assets(name)",
-        )
-        .in("user_id", scope.userIds)
-        .gte("received_at", start)
-        .lte("received_at", end)
-        .order("received_at", { ascending: false })
-        .limit(2000),
-      supabase
-        .from("expenses")
-        .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
-        .in("user_id", scope.userIds)
-        .neq("source", "pluggy")
-        .gte("spent_at", start)
-        .lte("spent_at", end)
-        .order("spent_at", { ascending: false })
-        .limit(2000),
-      supabase
-        .from("expenses")
-        .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
-        .in("user_id", scope.userIds)
-        .eq("source", "pluggy")
-        .gte("spent_at", prev.start)
-        .lte("spent_at", prev.end)
-        .order("spent_at", { ascending: false })
-        .limit(2000),
-      supabase
-        .from("incomes")
-        .select("amount, received_at")
-        .in("user_id", scope.userIds)
-        .gte("received_at", histRange.start)
-        .lte("received_at", histRange.end)
-        .limit(10000),
-      supabase
-        .from("expenses")
-        .select("amount, spent_at, source")
-        .in("user_id", scope.userIds)
-        .gte("spent_at", histCardStart)
-        .lte("spent_at", histRange.end)
-        .limit(10000),
+  // composta pelos gastos do mês anterior (pagos neste mês). Tudo paginado
+  // além do teto de 1000 linhas do PostgREST.
+  const [incomeData, manualData, cardData, histIncomeData, histExpenseData] =
+    await Promise.all([
+      fetchAllRows((f, t) =>
+        supabase
+          .from("incomes")
+          .select(
+            "id, user_id, amount, description, received_at, income_categories(name, slug), assets(name)",
+          )
+          .in("user_id", scope.userIds)
+          .gte("received_at", start)
+          .lte("received_at", end)
+          .order("received_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("expenses")
+          .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
+          .in("user_id", scope.userIds)
+          .neq("source", "pluggy")
+          .gte("spent_at", start)
+          .lte("spent_at", end)
+          .order("spent_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("expenses")
+          .select("id, user_id, amount, description, spent_at, source, expense_categories(name, slug)")
+          .in("user_id", scope.userIds)
+          .eq("source", "pluggy")
+          .gte("spent_at", prev.start)
+          .lte("spent_at", prev.end)
+          .order("spent_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("incomes")
+          .select("id, amount, received_at")
+          .in("user_id", scope.userIds)
+          .gte("received_at", histRange.start)
+          .lte("received_at", histRange.end)
+          .order("id", { ascending: true })
+          .range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("expenses")
+          .select("id, amount, spent_at, source")
+          .in("user_id", scope.userIds)
+          .gte("spent_at", histCardStart)
+          .lte("spent_at", histRange.end)
+          .order("id", { ascending: true })
+          .range(f, t),
+      ),
     ]);
 
   const incomes = (incomeData ?? []) as unknown as IncomeRow[];

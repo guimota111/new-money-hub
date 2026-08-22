@@ -9,6 +9,7 @@ import { ManualEntryForm } from "@/components/manual-entry-form";
 import { INCOME_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { createIncome, deleteIncome } from "./actions";
 
 const PAGE_SIZE = 50;
@@ -54,25 +55,27 @@ export default async function IncomesPage({
     supabase.from("income_categories").select("id, name, slug").order("name"),
   ]);
 
-  let query = supabase
-    .from("incomes")
-    .select(
-      "id, user_id, amount, description, received_at, source, income_categories(name, slug), assets(name)",
-    )
-    .in("user_id", scope.userIds);
-
   const selectedCategory = (categories ?? []).find((c) => c.slug === filters.categoria);
-  if (selectedCategory) query = query.eq("income_category_id", selectedCategory.id);
-  if (filters.busca) query = query.ilike("description", `%${filters.busca}%`);
-  if (filters.de) query = query.gte("received_at", filters.de);
-  if (filters.ate) query = query.lte("received_at", filters.ate);
+  const buildQuery = () => {
+    let query = supabase
+      .from("incomes")
+      .select(
+        "id, user_id, amount, description, received_at, source, income_categories(name, slug), assets(name)",
+      )
+      .in("user_id", scope.userIds);
+    if (selectedCategory) query = query.eq("income_category_id", selectedCategory.id);
+    if (filters.busca) query = query.ilike("description", `%${filters.busca}%`);
+    if (filters.de) query = query.gte("received_at", filters.de);
+    if (filters.ate) query = query.lte("received_at", filters.ate);
+    return query
+      .order("received_at", { ascending: false })
+      .order("id", { ascending: false });
+  };
 
-  // busca tudo filtrado (cap 5000) para somar; paginação em memória
-  const { data } = await query
-    .order("received_at", { ascending: false })
-    .limit(5000);
-
-  const all = (data ?? []) as unknown as IncomeRow[];
+  // busca tudo filtrado para somar, paginando além do teto de 1000 linhas
+  const all = (await fetchAllRows((from, to) =>
+    buildQuery().range(from, to),
+  )) as unknown as IncomeRow[];
   const totalAmount = all.reduce((sum, i) => sum + Number(i.amount), 0);
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

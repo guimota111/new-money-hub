@@ -10,6 +10,7 @@ import { CategoryCell } from "@/components/category-cell";
 import { EXPENSE_COLOR, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { createExpense, deleteExpense } from "./actions";
 
 const PAGE_SIZE = 50;
@@ -55,20 +56,25 @@ export default async function ExpensesPage({
     supabase.from("expense_categories").select("id, name, slug").order("name"),
   ]);
 
-  let query = supabase
-    .from("expenses")
-    .select("id, user_id, amount, description, spent_at, source, expense_category_id, expense_categories(name, slug)")
-    .in("user_id", scope.userIds);
-
   const selectedCategory = (categories ?? []).find((c) => c.slug === filters.categoria);
-  if (selectedCategory) query = query.eq("expense_category_id", selectedCategory.id);
-  if (filters.busca) query = query.ilike("description", `%${filters.busca}%`);
-  if (filters.de) query = query.gte("spent_at", filters.de);
-  if (filters.ate) query = query.lte("spent_at", filters.ate);
+  const buildQuery = () => {
+    let query = supabase
+      .from("expenses")
+      .select("id, user_id, amount, description, spent_at, source, expense_category_id, expense_categories(name, slug)")
+      .in("user_id", scope.userIds);
+    if (selectedCategory) query = query.eq("expense_category_id", selectedCategory.id);
+    if (filters.busca) query = query.ilike("description", `%${filters.busca}%`);
+    if (filters.de) query = query.gte("spent_at", filters.de);
+    if (filters.ate) query = query.lte("spent_at", filters.ate);
+    return query
+      .order("spent_at", { ascending: false })
+      .order("id", { ascending: false });
+  };
 
-  const { data } = await query.order("spent_at", { ascending: false }).limit(5000);
-
-  const all = (data ?? []) as unknown as ExpenseRow[];
+  // busca tudo filtrado para somar, paginando além do teto de 1000 linhas
+  const all = (await fetchAllRows((from, to) =>
+    buildQuery().range(from, to),
+  )) as unknown as ExpenseRow[];
   const totalAmount = all.reduce((sum, e) => sum + Number(e.amount), 0);
   const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   const rows = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
