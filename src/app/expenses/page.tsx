@@ -7,9 +7,11 @@ import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
 import { ManualEntryForm } from "@/components/manual-entry-form";
 import { CategoryCell } from "@/components/category-cell";
-import { EXPENSE_COLOR, slotIndex } from "@/lib/chart-colors";
+import { PeriodFilter } from "@/components/period-filter";
+import { EXPENSE_COLOR, colorForSlug, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { periodParams, resolvePeriod } from "@/lib/period";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { createExpense, deleteExpense } from "./actions";
 
@@ -37,6 +39,9 @@ export default async function ExpensesPage({
   searchParams: Promise<{
     categoria?: string;
     busca?: string;
+    periodo?: string;
+    mes?: string;
+    ano?: string;
     de?: string;
     ate?: string;
     pagina?: string;
@@ -45,6 +50,7 @@ export default async function ExpensesPage({
 }) {
   const filters = await searchParams;
   const page = Math.max(1, Number(filters.pagina) || 1);
+  const period = resolvePeriod(filters);
 
   const supabase = await createClient();
   const user = await getSessionUser(supabase);
@@ -64,8 +70,8 @@ export default async function ExpensesPage({
       .in("user_id", scope.userIds);
     if (selectedCategory) query = query.eq("expense_category_id", selectedCategory.id);
     if (filters.busca) query = query.ilike("description", `%${filters.busca}%`);
-    if (filters.de) query = query.gte("spent_at", filters.de);
-    if (filters.ate) query = query.lte("spent_at", filters.ate);
+    if (period.de) query = query.gte("spent_at", period.de);
+    if (period.ate) query = query.lte("spent_at", period.ate);
     return query
       .order("spent_at", { ascending: false })
       .order("id", { ascending: false });
@@ -92,15 +98,13 @@ export default async function ExpensesPage({
       key: slug,
       name: e.name,
       value: e.value,
-      color: EXPENSE_COLOR[slug] ?? "var(--chart-muted)",
+      color: EXPENSE_COLOR[slug] ?? colorForSlug(slug),
     }))
     .sort((a, b) => slotIndex(a.color) - slotIndex(b.color));
 
-  const baseParams = new URLSearchParams();
+  const baseParams = new URLSearchParams(periodParams(period));
   if (filters.categoria) baseParams.set("categoria", filters.categoria);
   if (filters.busca) baseParams.set("busca", filters.busca);
-  if (filters.de) baseParams.set("de", filters.de);
-  if (filters.ate) baseParams.set("ate", filters.ate);
   if (scope.casal) baseParams.set("visao", "casal");
   const pageHref = (p: number) => {
     const params = new URLSearchParams(baseParams);
@@ -121,7 +125,8 @@ export default async function ExpensesPage({
               {scope.casal ? "Despesas do casal" : "Despesas"}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
-              {all.length} lançamento{all.length === 1 ? "" : "s"} · Total:{" "}
+              <span className="capitalize">{period.label}</span> · {all.length} lançamento
+              {all.length === 1 ? "" : "s"} ·{" "}
               <span className="font-semibold text-red-700 dark:text-red-400">
                 {formatBRL(totalAmount)}
               </span>
@@ -161,14 +166,13 @@ export default async function ExpensesPage({
               className={inputClass}
             />
           </div>
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-zinc-500">De</label>
-            <input name="de" type="date" defaultValue={filters.de ?? ""} className={inputClass} />
-          </div>
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-zinc-500">Até</label>
-            <input name="ate" type="date" defaultValue={filters.ate ?? ""} className={inputClass} />
-          </div>
+          <PeriodFilter
+            mode={period.mode}
+            mes={period.mes}
+            ano={period.ano}
+            de={filters.de}
+            ate={filters.ate}
+          />
           <button
             type="submit"
             className="rounded-md bg-zinc-950 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"

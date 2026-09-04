@@ -4,8 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { ViewToggle } from "@/components/view-toggle";
+import { PeriodFilter } from "@/components/period-filter";
 import { formatBRL, formatQuantity } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
+import { periodParams, resolvePeriod } from "@/lib/period";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 const PAGE_SIZE = 50;
@@ -35,6 +37,9 @@ export default async function MovementsPage({
     ticker?: string;
     tipo?: string;
     direcao?: string;
+    periodo?: string;
+    mes?: string;
+    ano?: string;
     de?: string;
     ate?: string;
     pagina?: string;
@@ -43,6 +48,7 @@ export default async function MovementsPage({
 }) {
   const filters = await searchParams;
   const page = Math.max(1, Number(filters.pagina) || 1);
+  const period = resolvePeriod(filters);
 
   const supabase = await createClient();
   const user = await getSessionUser(supabase);
@@ -66,8 +72,8 @@ export default async function MovementsPage({
   if (filters.direcao === "credito" || filters.direcao === "debito") {
     query = query.eq("direction", filters.direcao);
   }
-  if (filters.de) query = query.gte("moved_at", filters.de);
-  if (filters.ate) query = query.lte("moved_at", filters.ate);
+  if (period.de) query = query.gte("moved_at", period.de);
+  if (period.ate) query = query.lte("moved_at", period.ate);
 
   const from = (page - 1) * PAGE_SIZE;
   // lista filtrada + opções dos selects (tipos e tickers) em paralelo;
@@ -93,12 +99,10 @@ export default async function MovementsPage({
   const total = count ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const baseParams = new URLSearchParams();
+  const baseParams = new URLSearchParams(periodParams(period));
   if (filters.ticker) baseParams.set("ticker", filters.ticker);
   if (filters.tipo) baseParams.set("tipo", filters.tipo);
   if (filters.direcao) baseParams.set("direcao", filters.direcao);
-  if (filters.de) baseParams.set("de", filters.de);
-  if (filters.ate) baseParams.set("ate", filters.ate);
   if (scope.casal) baseParams.set("visao", "casal");
   const pageHref = (p: number) => {
     const params = new URLSearchParams(baseParams);
@@ -119,9 +123,9 @@ export default async function MovementsPage({
               {scope.casal ? "Movimentações do casal" : "Movimentações"}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
-              {total} registro{total === 1 ? "" : "s"}
-              {(filters.ticker || filters.tipo || filters.direcao || filters.de || filters.ate) &&
-                " com os filtros aplicados"}
+              <span className="capitalize">{period.label}</span> · {total} registro
+              {total === 1 ? "" : "s"}
+              {(filters.ticker || filters.tipo || filters.direcao) && " com os filtros aplicados"}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -165,14 +169,13 @@ export default async function MovementsPage({
               <option value="debito">Débito</option>
             </select>
           </div>
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-zinc-500">De</label>
-            <input name="de" type="date" defaultValue={filters.de ?? ""} className={inputClass} />
-          </div>
-          <div className="space-y-1">
-            <label className="block text-xs font-medium text-zinc-500">Até</label>
-            <input name="ate" type="date" defaultValue={filters.ate ?? ""} className={inputClass} />
-          </div>
+          <PeriodFilter
+            mode={period.mode}
+            mes={period.mes}
+            ano={period.ano}
+            de={filters.de}
+            ate={filters.ate}
+          />
           <button
             type="submit"
             className="rounded-md bg-zinc-950 px-4 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"

@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { ViewToggle } from "@/components/view-toggle";
 import { CategoryPie } from "@/components/charts/pie-chart";
-import { EXPENSE_COLOR, INCOME_COLOR, slotIndex } from "@/lib/chart-colors";
+import { EXPENSE_COLOR, INCOME_COLOR, colorForSlug, slotIndex } from "@/lib/chart-colors";
 import { formatBRL } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
@@ -181,7 +181,7 @@ export default async function MonthsPage({
       key: slug,
       name: e.name,
       value: e.value,
-      color: INCOME_COLOR[slug] ?? "var(--chart-muted)",
+      color: INCOME_COLOR[slug] ?? colorForSlug(slug),
     }))
     .sort((a, b) => slotIndex(a.color) - slotIndex(b.color));
 
@@ -198,7 +198,7 @@ export default async function MonthsPage({
       key: slug,
       name: e.name,
       value: e.value,
-      color: EXPENSE_COLOR[slug] ?? "var(--chart-muted)",
+      color: EXPENSE_COLOR[slug] ?? colorForSlug(slug),
     }))
     .sort((a, b) => slotIndex(a.color) - slotIndex(b.color));
 

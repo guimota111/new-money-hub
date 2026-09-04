@@ -7,7 +7,7 @@ import { EvolutionChart, type EvolutionPoint } from "@/components/charts/evoluti
 import {
   IncomeChart,
   type IncomeCategoryInfo,
-  type MonthlyIncomeRow,
+  type IncomeEntry,
 } from "@/components/charts/income-chart";
 import { ViewToggle } from "@/components/view-toggle";
 import { formatBRL } from "@/lib/format";
@@ -113,7 +113,6 @@ export default async function Home({
         .select("amount, received_at, income_categories!inner(name, slug)")
         .in("user_id", scope.userIds)
         .in("income_categories.slug", PASSIVE_SLUGS)
-        .gte("received_at", sinceIso)
         .order("received_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
@@ -175,28 +174,27 @@ export default async function Home({
     total,
   }));
 
-  // ---- renda passiva mensal ----------------------------------------------
-  const monthly = new Map<string, Record<string, number>>();
+  // ---- renda passiva (histórico completo; o card soma os últimos 12m) -----
+  const passiveEntries: IncomeEntry[] = [];
   const categoriesSeen = new Map<string, string>();
+  const monthsIn12m = new Set<string>();
   let passiveTotal12m = 0;
   for (const income of incomeData ?? []) {
     const cat = income.income_categories as unknown as { name: string; slug: string } | null;
     if (!cat || cat.slug === "salario") continue;
-    const month = String(income.received_at).slice(0, 7);
-    const bucket = monthly.get(month) ?? {};
-    bucket[cat.slug] = (bucket[cat.slug] ?? 0) + Number(income.amount);
-    monthly.set(month, bucket);
+    const date = String(income.received_at);
+    passiveEntries.push({ date, slug: cat.slug, amount: Number(income.amount) });
     categoriesSeen.set(cat.slug, cat.name);
-    passiveTotal12m += Number(income.amount);
+    if (date >= sinceIso) {
+      passiveTotal12m += Number(income.amount);
+      monthsIn12m.add(date.slice(0, 7));
+    }
   }
-  const incomeRows: MonthlyIncomeRow[] = [...monthly.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([month, values]) => ({ month, ...values }));
   const incomeCategories: IncomeCategoryInfo[] = [...categoriesSeen.entries()].map(
     ([slug, name]) => ({ slug, name }),
   );
 
-  const monthsWithData = Math.max(1, incomeRows.length);
+  const monthsWithData = Math.max(1, monthsIn12m.size);
   const monthlyAvg = passiveTotal12m / monthsWithData;
 
   // ---- saldo do mês corrente ---------------------------------------------
@@ -280,9 +278,9 @@ export default async function Home({
           </section>
           <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-              Renda passiva por mês
+              Renda passiva
             </h2>
-            <IncomeChart rows={incomeRows} categories={incomeCategories} />
+            <IncomeChart entries={passiveEntries} categories={incomeCategories} />
           </section>
         </div>
       </main>

@@ -35,3 +35,11 @@ export function slotIndex(color: string): number {
   const match = color.match(/--series-(\d)/);
   return match ? Number(match[1]) : 99;
 }
+
+// Categorias criadas pelo usuário não têm slot fixo — o hash do slug escolhe
+// um slot estável (a mesma categoria sempre ganha a mesma cor).
+export function colorForSlug(slug: string): string {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
+  return `var(--series-${(h % 8) + 1})`;
+}

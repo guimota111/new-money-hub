@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* dark é controlado por data-theme no <html> (toggle no header + localStorage),
+   não pelo prefers-color-scheme do sistema */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -27,25 +31,107 @@
   --chart-muted: #898781;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --chart-surface: #09090b;
-    --chart-grid: #2c2c2a;
-  }
+/* =========================================================================
+   Tema escuro "cyberpunk": fundo azul-espacial com grade, painéis navy com
+   brilho ciano, verde/vermelho neon. As utilities zinc/emerald/red do
+   Tailwind v4 resolvem para var(--color-*), então remapear os tokens aqui
+   recolore o app inteiro sem tocar nas classes de cada página.
+   ========================================================================= */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #050810;
+  --foreground: #e8f1ff;
+
+  --color-black: #050810;
+  --color-zinc-950: #0b1020;
+  --color-zinc-900: #121a33;
+  --color-zinc-800: #1e2a4d;
+  --color-zinc-700: #2c3b66;
+  --color-zinc-500: #8b95c9;
+  --color-zinc-400: #9da8d8;
+  --color-zinc-300: #c2cbec;
+  --color-zinc-200: #dde4f7;
+  --color-zinc-50: #eaf2ff;
+
+  --color-emerald-400: #00ffa3;
+  --color-emerald-500: #00e691;
+  --color-red-400: #ff4d7e;
+  --color-red-500: #ff3868;
+  --color-cyan-400: #00e5ff;
+
+  --series-1: #00c8ff;
+  --series-2: #ff8a2a;
+  --series-3: #00e69a;
+  --series-4: #ffd60a;
+  --series-5: #ff5c9e;
+  --series-6: #64dd17;
+  --series-7: #9d7bff;
+  --series-8: #ff5252;
+  --chart-surface: #0b1020;
+  --chart-grid: #223055;
+  --chart-muted: #8b95c9;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* fundo das páginas: grade + brilhos de neon (só no escuro; os wrappers de
+   página usam "dark:bg-black") */
+[data-theme="dark"] [class*="dark:bg-black"] {
+  background-color: #050810;
+  background-image:
+    radial-gradient(1100px 480px at 85% -10%, rgba(0, 229, 255, 0.08), transparent 60%),
+    radial-gradient(900px 420px at 0% 110%, rgba(157, 123, 255, 0.07), transparent 60%),
+    linear-gradient(rgba(110, 150, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 150, 255, 0.045) 1px, transparent 1px);
+  background-size:
+    auto,
+    auto,
+    44px 44px,
+    44px 44px;
+  background-attachment: fixed;
+}
+
+/* painéis (cards, tabelas, forms usam "dark:bg-zinc-950") ganham um contorno
+   ciano sutil */
+[data-theme="dark"] [class*="dark:bg-zinc-950"] {
+  box-shadow:
+    0 0 0 1px rgba(0, 229, 255, 0.05),
+    0 0 26px -14px rgba(0, 229, 255, 0.4);
+}
+
+/* botões primários (fundo claro no escuro) com halo neon */
+[data-theme="dark"] [class*="dark:bg-zinc-50"] {
+  box-shadow: 0 0 18px -6px rgba(0, 229, 255, 0.55);
+}
+
+/* verde/vermelho ganham brilho de letreiro */
+[data-theme="dark"] :is([class*="emerald-400"], [class*="red-400"]) {
+  text-shadow: 0 0 14px color-mix(in srgb, currentColor 40%, transparent);
+}
+
+/* títulos com fonte display futurista */
+[data-theme="dark"] h1,
+[data-theme="dark"] h2 {
+  font-family: var(--font-display), var(--font-geist-sans), sans-serif;
+  letter-spacing: 0.03em;
+}
+[data-theme="dark"] h1 {
+  text-shadow: 0 0 22px rgba(0, 229, 255, 0.25);
+}
+
+/* toggle de tema: o CSS decide qual ícone aparece, evitando divergência de
+   hidratação (o tema só é conhecido no cliente) */
+.theme-icon-dark {
+  display: none;
+}
+[data-theme="dark"] .theme-icon-dark {
+  display: inline;
+}
+[data-theme="dark"] .theme-icon-light {
+  display: none;
 }

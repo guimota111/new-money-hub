@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "@/app/login/actions";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const LINKS = [
   { href: "/months", label: "Meses" },
+  { href: "/years", label: "Anos" },
   { href: "/assets", label: "Ativos" },
   { href: "/movements", label: "Movimentações" },
   { href: "/incomes", label: "Receitas" },
   { href: "/expenses", label: "Despesas" },
   { href: "/connections", label: "Conexões" },
+  { href: "/settings", label: "Opções" },
 ];
 
 export function Header({ userName, view }: { userName: string; view?: "casal" }) {
@@ -42,7 +45,7 @@ export function Header({ userName, view }: { userName: string; view?: "casal" })
                 href={`${link.href}${suffix}`}
                 className={
                   active
-                    ? "text-sm font-medium text-zinc-950 underline decoration-2 underline-offset-8 dark:text-zinc-50"
+                    ? "text-sm font-medium text-zinc-950 underline decoration-2 underline-offset-8 dark:text-zinc-50 dark:decoration-cyan-400"
                     : "text-sm text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-50"
                 }
               >
@@ -53,6 +56,7 @@ export function Header({ userName, view }: { userName: string; view?: "casal" })
         </nav>
       </div>
       <div className="flex items-center gap-4">
+        <ThemeToggle />
         <span className="text-sm text-zinc-500">{userName}</span>
         <form action={signOut}>
           <button
