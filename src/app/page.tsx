@@ -17,11 +17,36 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 const MONTHS_SHOWN = 12;
 
-function StatTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+// renda passiva = renda de investimento; "outros" ficou ambíguo desde que
+// Pix recebidos entram como receita, então a lista é explícita
+const PASSIVE_SLUGS = [
+  "dividendos",
+  "jcp",
+  "rendimento_fii",
+  "rendimento_renda_fixa",
+];
+
+function StatTile({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "positive" | "negative";
+}) {
+  const valueClass =
+    tone === "positive"
+      ? "text-emerald-700 dark:text-emerald-400"
+      : tone === "negative"
+        ? "text-red-700 dark:text-red-400"
+        : "text-zinc-950 dark:text-zinc-50";
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
       <p className="text-sm text-zinc-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">{value}</p>
+      <p className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</p>
       {hint && <p className="mt-1 text-xs text-zinc-500">{hint}</p>}
     </div>
   );
@@ -48,9 +73,25 @@ export default async function Home({
   since.setMonth(since.getMonth() - MONTHS_SHOWN);
   const sinceIso = since.toISOString().slice(0, 10);
 
+  // mês corrente (fuso BR) para o card de saldo do mês; a fatura do cartão é
+  // composta pelos gastos do mês anterior, como na página Meses
+  const mesAtual = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+  }).format(new Date());
+  const [anoM, mesM] = mesAtual.split("-").map(Number);
+  const mesStart = `${mesAtual}-01`;
+  const mesEnd = `${mesAtual}-${String(new Date(Date.UTC(anoM, mesM, 0)).getUTCDate()).padStart(2, "0")}`;
+  const prevRef = new Date(Date.UTC(anoM, mesM - 2, 1));
+  const prevYm = `${prevRef.getUTCFullYear()}-${String(prevRef.getUTCMonth() + 1).padStart(2, "0")}`;
+  const prevStart = `${prevYm}-01`;
+  const prevEnd = `${prevYm}-${String(new Date(Date.UTC(prevRef.getUTCFullYear(), prevRef.getUTCMonth() + 1, 0)).getUTCDate()).padStart(2, "0")}`;
+
   // as três consultas são independentes — uma ida ao Supabase em paralelo;
   // snapshots e incomes paginam além do teto de 1000 linhas do PostgREST
-  const [{ data: assetData }, snapshotData, incomeData] = await Promise.all([
+  const [{ data: assetData }, snapshotData, incomeData, mesIncomes, mesManual, mesCard] =
+    await Promise.all([
     supabase
       .from("assets")
       .select(
@@ -69,11 +110,43 @@ export default async function Home({
     fetchAllRows((from, to) =>
       supabase
         .from("incomes")
-        .select("amount, received_at, income_categories(name, slug)")
+        .select("amount, received_at, income_categories!inner(name, slug)")
         .in("user_id", scope.userIds)
+        .in("income_categories.slug", PASSIVE_SLUGS)
         .gte("received_at", sinceIso)
-        .neq("income_categories.slug", "salario")
         .order("received_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("incomes")
+        .select("id, amount")
+        .in("user_id", scope.userIds)
+        .gte("received_at", mesStart)
+        .lte("received_at", mesEnd)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("expenses")
+        .select("id, amount")
+        .in("user_id", scope.userIds)
+        .neq("source", "pluggy")
+        .gte("spent_at", mesStart)
+        .lte("spent_at", mesEnd)
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase
+        .from("expenses")
+        .select("id, amount")
+        .in("user_id", scope.userIds)
+        .eq("source", "pluggy")
+        .gte("spent_at", prevStart)
+        .lte("spent_at", prevEnd)
         .order("id", { ascending: true })
         .range(from, to),
     ),
@@ -126,6 +199,29 @@ export default async function Home({
   const monthsWithData = Math.max(1, incomeRows.length);
   const monthlyAvg = passiveTotal12m / monthsWithData;
 
+  // ---- saldo do mês corrente ---------------------------------------------
+  const mesIn = mesIncomes.reduce((sum, r) => sum + Number(r.amount), 0);
+  const mesOut = [...mesManual, ...mesCard].reduce((sum, r) => sum + Number(r.amount), 0);
+  const mesSaldo = mesIn - mesOut;
+
+  // ---- variação patrimonial (~30 dias, pela série de snapshots) -----------
+  let variation: { amount: number; pct: number } | null = null;
+  if (evolution.length >= 2) {
+    const latest = evolution[evolution.length - 1];
+    const cutoff = new Date(new Date(latest.date).getTime() - 30 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    // sem fallback: só mostra quando existe medição de ~30 dias atrás, senão
+    // uma série recém-começada inflaria a variação
+    const baseline = [...evolution].reverse().find((p) => p.date <= cutoff);
+    if (baseline && baseline.date !== latest.date && baseline.total > 0) {
+      variation = {
+        amount: latest.total - baseline.total,
+        pct: (latest.total / baseline.total - 1) * 100,
+      };
+    }
+  }
+
   const pricesUpdatedAt = assets
     .map((a) => a.market_instruments?.current_price_updated_at)
     .filter(Boolean)
@@ -147,17 +243,25 @@ export default async function Home({
             label="Patrimônio total"
             value={formatBRL(totalValue)}
             hint={
-              pricesUpdatedAt
-                ? `Cotações de ${new Date(String(pricesUpdatedAt)).toLocaleString("pt-BR")}`
-                : "Baseado no preço médio — cotações automáticas em breve"
+              variation
+                ? `${variation.amount >= 0 ? "+" : ""}${formatBRL(variation.amount)} (${variation.pct >= 0 ? "+" : ""}${variation.pct.toFixed(1)}%) em ~30 dias · ${assets.length} ativos`
+                : pricesUpdatedAt
+                  ? `${assets.length} ativos · cotações de ${new Date(String(pricesUpdatedAt)).toLocaleString("pt-BR")}`
+                  : `${assets.length} ativos`
             }
+          />
+          <StatTile
+            label="Saldo do mês"
+            value={`${mesSaldo >= 0 ? "+" : ""}${formatBRL(mesSaldo)}`}
+            tone={mesSaldo >= 0 ? "positive" : "negative"}
+            hint={`entradas ${formatBRL(mesIn)} · saídas ${formatBRL(mesOut)}`}
           />
           <StatTile
             label={`Renda passiva (últimos ${MONTHS_SHOWN} meses)`}
             value={formatBRL(passiveTotal12m)}
+            hint="dividendos, JCP, FIIs e renda fixa"
           />
           <StatTile label="Média mensal de renda passiva" value={formatBRL(monthlyAvg)} />
-          <StatTile label="Ativos em carteira" value={String(assets.length)} />
         </div>
 
         <section className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
