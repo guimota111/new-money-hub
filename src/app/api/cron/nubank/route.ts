@@ -482,7 +482,7 @@ export async function GET(request: NextRequest) {
         // também filtra; "Valor recebido de Investimentos" são proventos que
         // o sync de investimentos já lança — aqui seria contagem dupla
         const IGNORE_ACCOUNT_DESC =
-          /(compra|venda) de renda vari|criptomoeda|tesouro direto|aplica[çc][ãa]o|resgate rdb|resgate cdb|dinheiro guardado|caixinha|valor recebido de investimentos/i;
+          /(compra|venda) de renda vari|criptomoeda|tesouro direto|aplica[çc][ãa]o|resgate rdb|resgate cdb|dinheiro guardado|caixinha|valor recebido de investimentos|pagamento de fatura/i;
 
         const knownExpIds = new Set<string>();
         for (let offset = 0; ; offset += 1000) {
