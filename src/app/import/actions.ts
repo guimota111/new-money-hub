@@ -31,6 +31,17 @@ export async function importB3(formData: FormData) {
     redirect(`/import?erro=${encodeURIComponent(e instanceof Error ? e.message : "Arquivo inválido.")}`);
   }
 
+  // tickers geridos pela sincronização automática do Nubank ficam de fora —
+  // lá o cron é a fonte da verdade (evita contagem dupla de compra/provento)
+  const { data: managedAssets } = await supabase
+    .from("assets")
+    .select("name")
+    .eq("user_id", user.id)
+    .not("metadata->>pluggy_investment_id", "is", null);
+  const managed = new Set((managedAssets ?? []).map((a) => a.name));
+  const skippedAuto = parsed.filter((m) => m.ticker && managed.has(m.ticker)).length;
+  parsed = parsed.filter((m) => !(m.ticker && managed.has(m.ticker)));
+
   // ---- movements novos (dedup contra o que já existe) ----------------------
   const known = new Set<string>();
   for (let offset = 0; ; offset += 1000) {
@@ -185,6 +196,7 @@ export async function importB3(formData: FormData) {
     inc: String(newIncomes.length),
     dup: String(parsed.length - newMovements.length),
   });
+  if (skippedAuto > 0) params.set("auto", String(skippedAuto));
   if (updatedPositions.length > 0) params.set("pos", updatedPositions.join(","));
   redirect(`/import?${params.toString()}`);
 }

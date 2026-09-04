@@ -20,11 +20,23 @@ export interface PluggyInvestment {
   type: string; // FIXED_INCOME | EQUITY | ...
   subtype: string; // CDB | TREASURY | STOCK | REAL_ESTATE_FUND | ...
   name: string;
+  code: string | null; // ticker (ex: BBAS3) para EQUITY
   balance: number;
+  quantity: number | null;
+  value: number | null; // preço unitário atual
   amountOriginal: number | null;
   rate: number | null;
   rateType: string | null;
   dueDate: string | null;
+}
+
+export interface PluggyInvestmentTransaction {
+  id: string;
+  type: string; // BUY | SELL | INTEREST | ...
+  date: string;
+  quantity: number | null;
+  value: number | null; // preço unitário
+  amount: number | null; // valor total
 }
 
 export interface PluggyTransaction {
@@ -97,6 +109,17 @@ export async function fetchInvestments(
   itemId: string,
 ): Promise<PluggyInvestment[]> {
   const data = await get(apiKey, `/investments?itemId=${itemId}`);
+  return data.results ?? [];
+}
+
+export async function fetchInvestmentTransactions(
+  apiKey: string,
+  investmentId: string,
+): Promise<PluggyInvestmentTransaction[]> {
+  const data = await get(
+    apiKey,
+    `/investments/${investmentId}/transactions?pageSize=500`,
+  );
   return data.results ?? [];
 }
 

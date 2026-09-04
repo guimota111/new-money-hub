@@ -8,7 +8,14 @@ import { importB3 } from "./actions";
 export default async function ImportPage({
   searchParams,
 }: {
-  searchParams: Promise<{ mov?: string; inc?: string; dup?: string; pos?: string; erro?: string }>;
+  searchParams: Promise<{
+    mov?: string;
+    inc?: string;
+    dup?: string;
+    auto?: string;
+    pos?: string;
+    erro?: string;
+  }>;
 }) {
   const result = await searchParams;
 
@@ -61,6 +68,12 @@ export default async function ImportPage({
               {Number(result.dup) > 0 && ` · ${result.dup} linha(s) já existiam e foram ignoradas`}
             </p>
             {result.pos && <p>Posições atualizadas: {result.pos.split(",").join(", ")}</p>}
+            {result.auto && (
+              <p>
+                {result.auto} linha(s) de ativos sincronizados automaticamente pelo
+                Nubank foram ignoradas (o cron diário já cuida deles).
+              </p>
+            )}
           </div>
         )}
 
