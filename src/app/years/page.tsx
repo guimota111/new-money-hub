@@ -185,7 +185,7 @@ export default async function YearsPage({
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
       <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
-      <main className="w-full flex-1 space-y-6 px-6 py-8">
+      <main className="w-full flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
@@ -197,7 +197,7 @@ export default async function YearsPage({
               que são pagas.
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {scope.canToggle && (
               <ViewToggle basePath="/years" params={filters} casal={scope.casal} />
             )}
@@ -312,9 +312,10 @@ export default async function YearsPage({
                 <div key={m.mes} className="flex items-center gap-3">
                   <Link
                     href={monthHref(m.mes)}
-                    className="w-24 shrink-0 text-sm text-zinc-500 underline-offset-2 hover:underline"
+                    className="w-14 shrink-0 text-sm text-zinc-500 underline-offset-2 hover:underline sm:w-24"
                   >
-                    {MONTHS_PT[i]}
+                    <span className="sm:hidden">{MONTHS_PT[i].slice(0, 3).toLowerCase()}</span>
+                    <span className="hidden sm:inline">{MONTHS_PT[i]}</span>
                   </Link>
                   <div className="flex-1 space-y-1">
                     <div className="h-3.5 overflow-hidden rounded-sm bg-zinc-100 dark:bg-zinc-900">
@@ -332,12 +333,12 @@ export default async function YearsPage({
                       />
                     </div>
                   </div>
-                  <div className="w-40 shrink-0 text-right text-xs">
+                  <div className="hidden w-40 shrink-0 text-right text-xs sm:block">
                     <div className="text-emerald-700 dark:text-emerald-400">{formatBRL(m.in)}</div>
                     <div className="text-red-700 dark:text-red-400">{formatBRL(m.out)}</div>
                   </div>
                   <div
-                    className={`w-24 shrink-0 text-right text-sm font-medium ${
+                    className={`w-20 shrink-0 text-right text-sm font-medium sm:w-24 ${
                       net >= 0
                         ? "text-emerald-700 dark:text-emerald-400"
                         : "text-red-700 dark:text-red-400"
@@ -364,7 +365,7 @@ export default async function YearsPage({
                 <div key={h.ano} className="flex items-center gap-3">
                   <Link
                     href={yearHref(h.ano)}
-                    className={`w-24 shrink-0 text-sm underline-offset-2 hover:underline ${
+                    className={`w-14 shrink-0 text-sm underline-offset-2 hover:underline sm:w-24 ${
                       h.ano === anoStr
                         ? "font-semibold text-zinc-950 dark:text-zinc-50"
                         : "text-zinc-500"
@@ -388,12 +389,12 @@ export default async function YearsPage({
                       />
                     </div>
                   </div>
-                  <div className="w-40 shrink-0 text-right text-xs">
+                  <div className="hidden w-40 shrink-0 text-right text-xs sm:block">
                     <div className="text-emerald-700 dark:text-emerald-400">{formatBRL(h.in)}</div>
                     <div className="text-red-700 dark:text-red-400">{formatBRL(h.out)}</div>
                   </div>
                   <div
-                    className={`w-24 shrink-0 text-right text-sm font-medium ${
+                    className={`w-20 shrink-0 text-right text-sm font-medium sm:w-24 ${
                       net >= 0
                         ? "text-emerald-700 dark:text-emerald-400"
                         : "text-red-700 dark:text-red-400"

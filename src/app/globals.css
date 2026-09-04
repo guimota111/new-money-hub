@@ -124,6 +124,22 @@ body {
   text-shadow: 0 0 22px rgba(0, 229, 255, 0.25);
 }
 
+/* iOS não suporta background-attachment: fixed direito — em telas pequenas a
+   grade rola junto com a página */
+@media (max-width: 640px) {
+  [data-theme="dark"] [class*="dark:bg-black"] {
+    background-attachment: scroll;
+  }
+}
+
+/* nav do header rola horizontalmente no celular, sem barra visível */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* toggle de tema: o CSS decide qual ícone aparece, evitando divergência de
    hidratação (o tema só é conhecido no cliente) */
 .theme-icon-dark {

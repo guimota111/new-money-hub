@@ -229,8 +229,8 @@ export default async function Home({
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
       <Header userName={profile?.name ?? user.email ?? ""} view={scope.casal ? "casal" : undefined} />
-      <main className="w-full flex-1 space-y-6 px-6 py-8">
-        <div className="flex items-center justify-between gap-4">
+      <main className="w-full flex-1 space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
             {scope.casal ? "Visão do casal" : "Visão geral"}
           </h1>
