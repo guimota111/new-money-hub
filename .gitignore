@@ -49,3 +49,6 @@ next-env.d.ts
 
 # extratos B3 exportados na raiz
 *.xlsx
+
+# scripts temporarios de manutencao
+.tmp-*
