@@ -230,7 +230,11 @@ export default async function ExpensesPage({
                     />
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500">
-                    {expense.source === "pluggy" ? "Cartão Nubank" : "Manual"}
+                    {expense.source === "pluggy"
+                      ? "Cartão Nubank"
+                      : expense.source === "pluggy_conta"
+                        ? "Conta Nubank"
+                        : "Manual"}
                   </td>
                   {scope.casal && (
                     <td className="px-4 py-2.5 text-zinc-500">{scope.nameOf(expense.user_id)}</td>

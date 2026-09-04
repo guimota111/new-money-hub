@@ -476,7 +476,13 @@ export async function GET(request: NextRequest) {
       // contas da própria pessoa
       if (extIdReady) {
         const IGNORE_ACCOUNT =
-          /credit card|investment|application|redemption|savings|same person|pension/i;
+          /credit card|investment|application|redemption|savings|same person|pension|variable income|fixed income/i;
+        // a Pluggy categoriza mal parte dos movimentos de investimento
+        // (ex: "Compra de Renda Variável" vira "Shopping"), então a descrição
+        // também filtra; "Valor recebido de Investimentos" são proventos que
+        // o sync de investimentos já lança — aqui seria contagem dupla
+        const IGNORE_ACCOUNT_DESC =
+          /(compra|venda) de renda vari|criptomoeda|tesouro direto|aplica[çc][ãa]o|resgate rdb|resgate cdb|dinheiro guardado|caixinha|valor recebido de investimentos/i;
 
         const knownExpIds = new Set<string>();
         for (let offset = 0; ; offset += 1000) {
@@ -504,7 +510,10 @@ export async function GET(request: NextRequest) {
         for (const account of accounts.filter((a) => a.type === "BANK")) {
           const txs = await fetchAllTransactions(apiKey, account.id);
           const posted = txs.filter(
-            (t) => t.status === "POSTED" && !IGNORE_ACCOUNT.test(t.category ?? ""),
+            (t) =>
+              t.status === "POSTED" &&
+              !IGNORE_ACCOUNT.test(t.category ?? "") &&
+              !IGNORE_ACCOUNT_DESC.test(t.description ?? ""),
           );
 
           const creditRows = posted
@@ -517,7 +526,9 @@ export async function GET(request: NextRequest) {
               amount: Math.abs(t.amount),
               description: t.description,
               received_at: t.date.slice(0, 10),
-              source: "pluggy",
+              // 'pluggy_conta' distingue conta corrente do cartão ('pluggy'):
+              // só a fatura do cartão desloca para o mês seguinte
+              source: "pluggy_conta",
               external_id: t.id,
             }));
           for (let i = 0; i < creditRows.length; i += 500) {
@@ -541,7 +552,7 @@ export async function GET(request: NextRequest) {
               amount: Math.abs(t.amount),
               description: t.description,
               spent_at: t.date.slice(0, 10),
-              source: "pluggy",
+              source: "pluggy_conta",
               external_id: t.id,
             }));
           for (let i = 0; i < debitRows.length; i += 500) {
