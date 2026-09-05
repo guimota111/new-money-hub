@@ -14,6 +14,10 @@ import {
   type AllocationSettings,
 } from "@/lib/allocation";
 import { loadAllocationData } from "@/lib/allocation-data";
+import { MIGRATION_FILE_0010 } from "@/lib/consultor/run";
+import { isMissingTableError } from "@/lib/supabase/errors";
+import { SubmitButton } from "@/components/submit-button";
+import { startAnalysis } from "./actions";
 import {
   card,
   EmptyCategories,
@@ -29,6 +33,108 @@ import {
 } from "./ui";
 
 const EPS = 0.005;
+
+interface RunListRow {
+  id: string;
+  status: "running" | "done" | "failed";
+  mode: "standard" | "full";
+  contribution_amount: number | string;
+  cost_usd: number | string;
+  progress: number;
+  created_at: string;
+}
+
+const STATUS_LABEL: Record<RunListRow["status"], string> = {
+  running: "em andamento",
+  done: "concluída",
+  failed: "parou",
+};
+
+function AnalysisLauncher({
+  aporte,
+  defaultMode,
+  runs,
+  runsReady,
+}: {
+  aporte: string | undefined;
+  defaultMode: "standard" | "full";
+  runs: RunListRow[];
+  runsReady: boolean;
+}) {
+  return (
+    <section className={card}>
+      <h2 className={sectionTitle}>Análise completa com IA</h2>
+      <form action={startAnalysis} className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label htmlFor="aporte-ia" className="block text-xs font-medium text-zinc-500">
+            Aporte (R$)
+          </label>
+          <input
+            id="aporte-ia"
+            name="aporte"
+            inputMode="decimal"
+            required
+            placeholder="Ex: 3.000,00"
+            defaultValue={aporte ?? ""}
+            className={`${inputClass} w-40`}
+          />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="modo" className="block text-xs font-medium text-zinc-500">
+            Modo
+          </label>
+          <select id="modo" name="modo" defaultValue={defaultMode} className={inputClass}>
+            <option value="standard">Padrão: só caixas em déficit</option>
+            <option value="full">Completo: varre toda a carteira</option>
+          </select>
+        </div>
+        <SubmitButton pendingText="Iniciando..." className={primaryButton}>
+          Analisar carteira
+        </SubmitButton>
+        <p className="basis-full text-xs text-zinc-500">
+          Seleção de ativos com Opus 5 sobre os candidatos do pré-filtro, revisão das posições,
+          lista de compras e relatório. Leva alguns minutos e custa em torno de R$ 5 por rodada.
+        </p>
+      </form>
+
+      {!runsReady && (
+        <p className={`${noticeWarn} mt-4`}>
+          As análises precisam da migração 0010. Rode{" "}
+          <code className="font-mono text-xs">{MIGRATION_FILE_0010}</code> no SQL editor do Supabase.
+        </p>
+      )}
+      {runsReady && runs.length > 0 && (
+        <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Últimas análises</h3>
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-900">
+            {runs.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm">
+                <Link href={`/consultor/analise/${r.id}`} className="font-medium text-zinc-950 underline dark:text-zinc-50">
+                  {new Date(r.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                </Link>
+                <span className="text-zinc-500">aporte {formatBRL(Number(r.contribution_amount))}</span>
+                <span className="text-zinc-500">{r.mode === "full" ? "completo" : "padrão"}</span>
+                <span
+                  className={
+                    r.status === "failed"
+                      ? "text-red-700 dark:text-red-400"
+                      : r.status === "running"
+                        ? "text-amber-700 dark:text-amber-400"
+                        : "text-zinc-500"
+                  }
+                >
+                  {STATUS_LABEL[r.status]}
+                  {r.status === "running" ? ` (${r.progress}%)` : ""}
+                </span>
+                {Number(r.cost_usd) > 0 && <span className="text-zinc-400">US$ {Number(r.cost_usd).toFixed(2)}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function Report({
   report,
@@ -64,12 +170,15 @@ function Report({
               className={`${inputClass} w-48`}
             />
           </div>
-          <button type="submit" className={primaryButton}>
-            Analisar carteira
+          <button
+            type="submit"
+            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            Prévia sem IA
           </button>
           <p className="basis-full text-xs text-zinc-500 sm:basis-auto">
-            Nível 1: alocação por caixa. Seleção de ativos, notícias e poda entram nas
-            próximas entregas.
+            Nível 1: só a alocação por caixa, na hora e sem custo. A análise completa fica logo
+            abaixo.
           </p>
         </form>
       </section>
@@ -311,9 +420,15 @@ export default async function ConsultorPage({
   const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
-  const [{ data: profile }, data] = await Promise.all([
+  const [{ data: profile }, data, runsRes] = await Promise.all([
     supabase.from("profiles").select("name").eq("id", user.id).single(),
     loadAllocationData(supabase, user.id),
+    supabase
+      .from("analysis_runs")
+      .select("id, status, mode, contribution_amount, cost_usd, progress, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(5),
   ]);
 
   const contribution = Math.max(0, parseDecimal(aporte ?? "") ?? 0);
@@ -322,6 +437,8 @@ export default async function ConsultorPage({
     data.ready && data.categories.length > 0
       ? computeAllocation(data.assets, data.categories, settings, contribution)
       : null;
+  const runsReady = !isMissingTableError(runsRes.error);
+  const runs = (runsRes.data ?? []) as RunListRow[];
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
@@ -353,6 +470,14 @@ export default async function ConsultorPage({
         {erro && <p className={noticeError}>{erro}</p>}
         {!data.ready && <MigrationNotice />}
         {data.ready && data.categories.length === 0 && <EmptyCategories />}
+        {report && (
+          <AnalysisLauncher
+            aporte={aporte}
+            defaultMode={settings.default_mode}
+            runs={runs}
+            runsReady={runsReady}
+          />
+        )}
         {report && <Report report={report} settings={settings} aporte={aporte} />}
       </main>
     </div>

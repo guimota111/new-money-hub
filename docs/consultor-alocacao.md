@@ -246,6 +246,20 @@ source_refresh
   source pk, refreshed_at, item_count, note
 ```
 
+Implementado na migração 0010 (`supabase/migrations/0010_analysis_runs.sql`):
+
+```
+analysis_runs
+  id, user_id, status ('running' | 'done' | 'failed'), mode, contribution_amount, fx_rate,
+  step, progress, state jsonb (plan, done, prepared, rankings, shopping, narrative, usage),
+  report jsonb, narrative, tokens_in, tokens_out, cost_usd, error, step_started_at, created_at, finished_at
+
+analysis_recommendations
+  id, run_id, user_id, type ('buy' | 'reinforce' | 'trim' | 'sell' | 'watch' | 'substitute' | 'alternative'),
+  category_slug, ticker, market, quantity, amount_brl, price, currency, rationale,
+  status ('pending' | 'executed' | 'partial' | 'ignored'), status_source ('auto' | 'manual'), created_at, resolved_at
+```
+
 Proposto para as próximas entregas:
 
 ```
@@ -286,7 +300,13 @@ Cron de preços passa a buscar cotações EUA (Finnhub) e PTAX diária.
    - Pré-filtro (`src/lib/fundamentals/screen.ts`): regras por categoria (liquidez, patrimônio positivo, lucro positivo em 12 meses para BR, P/VP 0,4–1,6 e vacância ≤ 30% para FIIs, valor de mercado ≥ US$ 5 bi para EUA, sem exigência de lucro nos EUA) e corte por nota composta para 80 ações BR, 60 FIIs, 80 EUA e 30 internacional. Posições atuais nunca saem; vão marcadas quando falhariam.
    - Página `/consultor/universo`: status das fontes, botões de atualização (B3 inteira em ~1 s; EUA em lotes de 60 símbolos por causa do limite de 60 chamadas/min da Finnhub) e a tabela de candidatos por categoria com os indicadores e os motivos de corte.
    - Cron: o cron de preços passou a rodar `refreshFundamentalsDaily` com orçamento de 150 s (Hobby só permite 2 crons; `maxDuration` foi para 300). B3 a cada 7 dias, EUA em lotes de até 150 símbolos por noite até completar, detalhe das posições a cada 30 dias.
-4. Job em background (Workflows) + IA de ranking + lista de compras.
+4. **Feita (2026-09-05).** Job em background + IA de ranking + lista de compras.
+   - Migração 0010: `analysis_runs` (uma rodada; estado intermediário em `state` jsonb, custo em tokens/US$) e `analysis_recommendations` (cada sugestão, com status para a entrega 6).
+   - Execução: em vez do Vercel Workflows, uma máquina de etapas própria (`src/lib/consultor/run.ts`). O cliente (`RunDriver`) chama a server action `advanceAnalysis` em loop; cada chamada executa UMA etapa e grava o estado, então a rodada cabe no limite de 300 s da função e sobrevive a fechar a aba. Lock por `step_started_at` evita duas abas na mesma etapa; etapa que falha fica em `failed` com botão "tentar de novo".
+   - Etapas: `prepare` (nível 1 + universo + pré-filtro por categoria, compacta posições e candidatos), `rank:<slug>` (uma chamada Opus 5 por categoria, saída estruturada validada por zod), `shopping` (código: pesos → R$ e quantidade; cotação Finnhub na hora para candidatos EUA), `narrative` (Sonnet 5 escreve o relatório).
+   - Modo padrão analisa só categorias com aporte; completo analisa as quatro selecionáveis. Renda fixa, cripto e categorias personalizadas só recebem o valor.
+   - Página `/consultor/analise/[id]`: andamento com barra, depois relatório: alocação vs meta, lista de compras consolidada, alertas (reduzir/vender/observar/substituir com nota de imposto), por categoria as posições revisadas e alternativas, texto do relatório e custo da rodada.
+   - Precisa de `ANTHROPIC_API_KEY` (.env.local e Vercel). Fallbacks server-side de recusa não foram ativados; recusa vira erro com retry.
 5. Notícias + poda + avisos tributários.
 6. Histórico, detecção de recomendações acatadas, contexto da rodada anterior.
 7. Ingestão CVM DFP/ITR para histórico plurianual de lucro e dívida.

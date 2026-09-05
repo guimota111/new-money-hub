@@ -13,6 +13,8 @@ import {
   suggestAllocation,
   type AllocationAssetRow,
 } from "@/lib/allocation";
+import { advanceRun, createRun, retryRun } from "@/lib/consultor/run";
+import type { RunSnapshot } from "@/lib/consultor/types";
 
 // Consultor de Alocação — categorias, metas, configurações e classificação
 // dos ativos. Tudo individual: as queries filtram por user_id além do RLS
@@ -189,6 +191,35 @@ export async function deleteCategory(formData: FormData) {
 
   revalidateModule();
   redirect(CATEGORIAS);
+}
+
+// ---- análise com IA (entrega 4) -------------------------------------------
+
+export async function startAnalysis(formData: FormData) {
+  const contribution = parseDecimal(String(formData.get("aporte") ?? ""));
+  if (contribution == null || contribution < 0) fail(HOME, "Informe o valor do aporte.");
+  const mode = formData.get("modo") === "full" ? "full" : "standard";
+  if (!process.env.ANTHROPIC_API_KEY) {
+    fail(HOME, "ANTHROPIC_API_KEY não configurada: crie a chave em console.anthropic.com e coloque no .env.local e na Vercel.");
+  }
+
+  const { supabase, user } = await requireUser();
+  const result = await createRun(supabase, user.id, { contribution, mode });
+  if ("error" in result) fail(HOME, result.error);
+  redirect(`/consultor/analise/${result.id}`);
+}
+
+// Chamada pelo cliente em loop: executa uma etapa e devolve o estado.
+export async function advanceAnalysis(runId: string): Promise<RunSnapshot> {
+  const { supabase, user } = await requireUser();
+  const snapshot = await advanceRun(supabase, user.id, runId);
+  if (snapshot.status !== "running") revalidatePath(`/consultor/analise/${runId}`);
+  return snapshot;
+}
+
+export async function retryAnalysis(runId: string): Promise<RunSnapshot> {
+  const { supabase, user } = await requireUser();
+  return retryRun(supabase, user.id, runId);
 }
 
 // ---- classificação dos ativos ---------------------------------------------
