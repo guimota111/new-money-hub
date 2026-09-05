@@ -235,16 +235,20 @@ fx_rates
   pair pk ('USDBRL'), rate, rate_date, source ('bcb_ptax'), fetched_at  -- leitura p/ autenticados, escrita pelo cron
 ```
 
+Implementado na migração 0009 (`supabase/migrations/0009_fundamentals_cache.sql`):
+
+```
+fundamentals_cache
+  market ('BR' | 'US'), ticker, source, payload jsonb, fetched_at — pk (market, ticker, source)
+  fontes: fundamentus_stock, fundamentus_fii, fundamentus_details, brapi_stock, brapi_fund, finnhub_metric
+
+source_refresh
+  source pk, refreshed_at, item_count, note
+```
+
 Proposto para as próximas entregas:
 
 ```
-
-market_instruments
-  + sector text (entrega 3, vindo do universo brapi / Fundamentus)
-
-fundamentals_cache
-  id, ticker text, market ('BR' | 'US'), source ('fundamentus' | 'finnhub' | 'cvm'), payload jsonb, fetched_at
-
 news_cache
   id, ticker text, source, title, url, published_at, snippet, fetched_at
 
@@ -276,7 +280,12 @@ Cron de preços passa a buscar cotações EUA (Finnhub) e PTAX diária.
    - `current_price` continua sempre em BRL (US$ × PTAX), então patrimônio, snapshots e o nível 1 do consultor não mudam. A página de ativos mostra cotação, preço médio e resultado em US$ para esses ativos.
    - Cron: PTAX do Banco Central (última dos 10 dias), Finnhub para a bolsa americana (precisa de `FINNHUB_TOKEN` no `.env.local` e na Vercel), CoinGecko para BTC e ETH. Ao cadastrar um ativo americano o símbolo é validado na Finnhub e a primeira cotação já é gravada.
    - Sem a migração 0008 o cron segue atualizando B3, Tesouro e BTC; sem `FINNHUB_TOKEN` a bolsa americana fica sem cotação e o cron avisa em `errors`.
-3. Adaptadores Fundamentus (screening ações + FIIs + detalhe) e Finnhub + cache + pré-filtro em código.
+3. **Feita (2026-09-05).** Adaptadores Fundamentus (screening ações + FIIs + detalhe) e Finnhub + cache + pré-filtro em código.
+   - Migração 0009: `fundamentals_cache` (payload bruto por mercado, ticker e fonte) e `source_refresh` (última atualização por fonte). Normalização em código (`src/lib/fundamentals/normalize.ts`), então trocar de fonte não exige migração.
+   - Fontes: Fundamentus `resultado.php` (994 ações, 22 colunas) e `fii_resultado.php` (561 FIIs, com vacância e cap rate), `detalhes.php` para as posições; lista da brapi para setor, subtipo e valor de mercado; Finnhub `/stock/metric` para os EUA (múltiplos TTM + série anual de EPS, margem, ROE e dívida/PL de ~6 anos, no plano grátis). Universo EUA: S&P 500 estático em `src/data/sp500.json` (Wikipedia, atualizar trimestralmente), 8 ETFs de mercado americano, 10 ETFs ex-EUA e 20 ADRs em `src/lib/fundamentals/universe.ts`.
+   - Pré-filtro (`src/lib/fundamentals/screen.ts`): regras por categoria (liquidez, patrimônio positivo, lucro positivo em 12 meses para BR, P/VP 0,4–1,6 e vacância ≤ 30% para FIIs, valor de mercado ≥ US$ 5 bi para EUA, sem exigência de lucro nos EUA) e corte por nota composta para 80 ações BR, 60 FIIs, 80 EUA e 30 internacional. Posições atuais nunca saem; vão marcadas quando falhariam.
+   - Página `/consultor/universo`: status das fontes, botões de atualização (B3 inteira em ~1 s; EUA em lotes de 60 símbolos por causa do limite de 60 chamadas/min da Finnhub) e a tabela de candidatos por categoria com os indicadores e os motivos de corte.
+   - Cron: o cron de preços passou a rodar `refreshFundamentalsDaily` com orçamento de 150 s (Hobby só permite 2 crons; `maxDuration` foi para 300). B3 a cada 7 dias, EUA em lotes de até 150 símbolos por noite até completar, detalhe das posições a cada 30 dias.
 4. Job em background (Workflows) + IA de ranking + lista de compras.
 5. Notícias + poda + avisos tributários.
 6. Histórico, detecção de recomendações acatadas, contexto da rodada anterior.

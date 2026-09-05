@@ -9,8 +9,11 @@ import {
 } from "@/lib/prices";
 import { isCryptoClass, isUsClass } from "@/lib/portfolio";
 import { isMissingTableError } from "@/lib/supabase/errors";
+import { refreshFundamentalsDaily } from "@/lib/fundamentals/cache";
 
-export const maxDuration = 120;
+// preços (~1 min) + fundamentos em lote (orçamento de 150 s); o plano Hobby
+// permite até 300 s e só 2 crons, por isso tudo roda aqui
+export const maxDuration = 300;
 
 interface InstrumentRow {
   id: string;
@@ -288,5 +291,17 @@ export async function GET(request: NextRequest) {
     else summary.snapshots = snapshotRows.length;
   }
 
-  return NextResponse.json(summary);
+  // ---- fundamentos (Consultor): B3 semanal, EUA em lotes diários ---------
+  let fundamentals: Record<string, unknown> = {};
+  try {
+    fundamentals = await refreshFundamentalsDaily(admin, {
+      brapiToken,
+      finnhubToken,
+      deadlineMs: 150_000,
+    });
+  } catch (e) {
+    summary.errors.push(`fundamentos: ${e instanceof Error ? e.message : "erro"}`);
+  }
+
+  return NextResponse.json({ ...summary, fundamentals });
 }

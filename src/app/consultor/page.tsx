@@ -337,12 +337,15 @@ export default async function ConsultorPage({
               deve entrar. Só os seus ativos, na cotação mais recente.
             </p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <Link href="/consultor/classificar" className={linkClass}>
               Classificar ativos
             </Link>
             <Link href="/consultor/categorias" className={linkClass}>
               Categorias e metas
+            </Link>
+            <Link href="/consultor/universo" className={linkClass}>
+              Universo e pré-filtro
             </Link>
           </div>
         </div>
