@@ -4,15 +4,20 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
 import { AssetForm } from "@/components/asset-form";
+import { CLASS_ORDER } from "@/lib/portfolio";
 import { createAsset } from "../actions";
 
-const CLASS_OPTIONS = [
-  { slug: "renda_fixa", label: "Renda Fixa (Tesouro)" },
-  { slug: "conta_corrente", label: "Conta / Caixinha" },
-  { slug: "acoes", label: "Ação" },
-  { slug: "fiis", label: "FII" },
-  { slug: "bitcoin", label: "Bitcoin" },
-];
+// As classes vêm do banco (a migração 0008 troca Bitcoin por Criptomoedas e
+// adiciona Bolsa americana); aqui só o rótulo curto de cada uma.
+const CLASS_LABELS: Record<string, string> = {
+  renda_fixa: "Renda Fixa (Tesouro)",
+  conta_corrente: "Conta / Caixinha",
+  acoes: "Ação / ETF (B3)",
+  fiis: "FII",
+  bolsa_eua: "Bolsa americana (US$)",
+  bitcoin: "Bitcoin",
+  cripto: "Cripto (BTC / ETH)",
+};
 
 export default async function NewAssetPage({
   searchParams,
@@ -25,13 +30,20 @@ export default async function NewAssetPage({
   const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name")
-    .eq("id", user.id)
-    .single();
+  const [{ data: profile }, { data: classRows }] = await Promise.all([
+    supabase.from("profiles").select("name").eq("id", user.id).single(),
+    supabase.from("asset_classes").select("slug, name"),
+  ]);
 
-  const selected = CLASS_OPTIONS.find((o) => o.slug === classSlug);
+  const rank = (slug: string) => {
+    const i = (CLASS_ORDER as readonly string[]).indexOf(slug);
+    return i === -1 ? CLASS_ORDER.length : i;
+  };
+  const options = ((classRows ?? []) as { slug: string; name: string }[])
+    .map((c) => ({ slug: c.slug, label: CLASS_LABELS[c.slug] ?? c.name }))
+    .sort((a, b) => rank(a.slug) - rank(b.slug));
+
+  const selected = options.find((o) => o.slug === classSlug);
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
@@ -50,7 +62,7 @@ export default async function NewAssetPage({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {CLASS_OPTIONS.map((option) => (
+          {options.map((option) => (
             <Link
               key={option.slug}
               href={`/assets/new?class=${option.slug}`}

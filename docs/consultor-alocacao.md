@@ -220,15 +220,27 @@ assets
 
 Categoria nula com `allocation_excluded = false` significa "ainda não classificado": o consultor ignora o ativo e avisa.
 
+Implementado na migração 0008 (`supabase/migrations/0008_bolsa_eua_fx_cripto.sql`):
+
+```
+asset_classes
+  + ('Bolsa americana', 'bolsa_eua')          -- negociado nos EUA, em US$
+  'bitcoin' → ('Criptomoedas', 'cripto')      -- BTC e ETH
+
+market_instruments
+  + currency text default 'BRL' ('BRL' | 'USD')
+  + current_price_native numeric             -- preço na moeda do ativo; current_price segue em BRL
+
+fx_rates
+  pair pk ('USDBRL'), rate, rate_date, source ('bcb_ptax'), fetched_at  -- leitura p/ autenticados, escrita pelo cron
+```
+
 Proposto para as próximas entregas:
 
 ```
 
 market_instruments
-  + currency text default 'BRL', + exchange text ('B3' | 'NYSE' | 'NASDAQ' | ...), + sector text
-
-asset_classes (novas linhas)
-  acoes_eua, internacional, cripto (ETH entra aqui; 'bitcoin' pode ser renomeado ou mantido)
+  + sector text (entrega 3, vindo do universo brapi / Fundamentus)
 
 fundamentals_cache
   id, ticker text, market ('BR' | 'US'), source ('fundamentus' | 'finnhub' | 'cvm'), payload jsonb, fetched_at
@@ -258,7 +270,12 @@ Cron de preços passa a buscar cotações EUA (Finnhub) e PTAX diária.
    - Rotas: `/consultor` (relatório + botão "Analisar carteira"), `/consultor/categorias` (metas, reserva, tetos), `/consultor/classificar` (classificação com sugestão automática).
    - Código: `src/lib/allocation.ts` (regras puras: `computeAllocation`, `suggestAllocation`, contagem no teto), `src/lib/allocation-data.ts` (carga), `src/app/consultor/*`.
    - Depende da migração 0007. Sem ela as páginas mostram o aviso e nada quebra.
-2. Cotações EUA + PTAX no cron; novas classes de ativo.
+2. **Feita (2026-09-05).** Cotações EUA + PTAX no cron; novas classes de ativo.
+   - Migração 0008: classe `bolsa_eua` ("Bolsa americana", ativos em US$ via Avenue), classe `bitcoin` renomeada para `cripto` ("Criptomoedas", BTC e ETH), colunas `currency` e `current_price_native` em `market_instruments`, tabela `fx_rates` com a última PTAX.
+   - Decisão: uma classe só para tudo que é negociado nos EUA. Se a exposição é EUA ou Internacional, quem decide é a categoria do consultor (a sugestão automática manda VXUS, TSM etc. para Internacional).
+   - `current_price` continua sempre em BRL (US$ × PTAX), então patrimônio, snapshots e o nível 1 do consultor não mudam. A página de ativos mostra cotação, preço médio e resultado em US$ para esses ativos.
+   - Cron: PTAX do Banco Central (última dos 10 dias), Finnhub para a bolsa americana (precisa de `FINNHUB_TOKEN` no `.env.local` e na Vercel), CoinGecko para BTC e ETH. Ao cadastrar um ativo americano o símbolo é validado na Finnhub e a primeira cotação já é gravada.
+   - Sem a migração 0008 o cron segue atualizando B3, Tesouro e BTC; sem `FINNHUB_TOKEN` a bolsa americana fica sem cotação e o cron avisa em `errors`.
 3. Adaptadores Fundamentus (screening ações + FIIs + detalhe) e Finnhub + cache + pré-filtro em código.
 4. Job em background (Workflows) + IA de ranking + lista de compras.
 5. Notícias + poda + avisos tributários.

@@ -1,8 +1,72 @@
 // Busca de cotações nas APIs externas (server-only).
-// brapi.dev: ações/FIIs e Tesouro Direto (exige token, plano grátis existe).
-// CoinGecko: Bitcoin em BRL (endpoint público sem chave).
+// brapi.dev: ações/FIIs da B3 (exige token, plano grátis serve para cotação).
+// Tesouro Transparente: PU dos títulos do Tesouro (CSV oficial).
+// Finnhub: ativos listados nos EUA, em US$ (grátis, 60 chamadas/min).
+// Banco Central: PTAX USD/BRL (sem chave).
+// CoinGecko: BTC e ETH em BRL (endpoint público sem chave).
 
 const BRAPI_BASE = "https://brapi.dev/api";
+
+// Cotação atual de um símbolo americano. Símbolo desconhecido volta tudo
+// zerado, por isso c <= 0 conta como "sem cotação".
+export async function fetchFinnhubQuote(symbol: string, token: string): Promise<number | null> {
+  const res = await fetch(
+    `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}`,
+    { headers: { "X-Finnhub-Token": token }, cache: "no-store" },
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  const price = data?.c;
+  return typeof price === "number" && price > 0 ? price : null;
+}
+
+export interface FxQuote {
+  rate: number;
+  /** data da cotação (yyyy-mm-dd) */
+  date: string;
+}
+
+// Última PTAX de venda dos últimos 10 dias: fim de semana e feriado não têm
+// cotação, então pedimos um período e ficamos com a mais recente.
+export async function fetchPtaxUsdBrl(): Promise<FxQuote | null> {
+  const fmt = (d: Date) =>
+    `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}-${d.getUTCFullYear()}`;
+  const end = new Date();
+  const start = new Date(end.getTime() - 10 * 86_400_000);
+  const url =
+    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/" +
+    "CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)" +
+    `?@dataInicial='${fmt(start)}'&@dataFinalCotacao='${fmt(end)}'` +
+    "&$top=1&$orderby=dataHoraCotacao%20desc&$format=json";
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const row = data?.value?.[0];
+  const rate = Number(row?.cotacaoVenda);
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  return { rate, date: String(row.dataHoraCotacao).slice(0, 10) };
+}
+
+const COINGECKO_IDS: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum" };
+export const CRYPTO_TICKERS = Object.keys(COINGECKO_IDS);
+
+// Preço em BRL por ticker (BTC, ETH) numa chamada só.
+export async function fetchCryptoBRL(tickers: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = [...new Set(tickers.map((t) => COINGECKO_IDS[t]).filter(Boolean))];
+  if (ids.length === 0) return out;
+  const res = await fetch(
+    `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(",")}&vs_currencies=brl`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return out;
+  const data = await res.json();
+  for (const [ticker, id] of Object.entries(COINGECKO_IDS)) {
+    const price = data?.[id]?.brl;
+    if (typeof price === "number" && price > 0) out.set(ticker, price);
+  }
+  return out;
+}
 
 export async function fetchBrapiQuote(
   ticker: string,
@@ -56,13 +120,3 @@ export async function fetchTesouroDiretoPrices(): Promise<Map<string, number>> {
   return new Map([...latest.entries()].map(([key, v]) => [key, v.price]));
 }
 
-export async function fetchBitcoinBRL(): Promise<number | null> {
-  const res = await fetch(
-    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl",
-    { cache: "no-store" },
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  const price = data?.bitcoin?.brl;
-  return typeof price === "number" && price > 0 ? price : null;
-}

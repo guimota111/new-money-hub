@@ -52,15 +52,7 @@ export const DEFAULT_SETTINGS: AllocationSettings = {
   default_mode: "standard",
 };
 
-// Tabela ou coluna ainda não existe: migração 0007 pendente. O PostgREST
-// devolve PGRST205 para tabela fora do schema cache e 42703 para coluna.
-export function isMissingTableError(
-  error: { code?: string; message?: string } | null | undefined,
-): boolean {
-  if (!error) return false;
-  if (error.code === "42P01" || error.code === "42703" || error.code === "PGRST205") return true;
-  return /schema cache|does not exist/i.test(error.message ?? "");
-}
+export { isMissingTableError } from "@/lib/supabase/errors";
 
 export function slugify(name: string): string {
   return (
@@ -100,6 +92,11 @@ const US_ETFS = new Set(["IVVB11", "SPXI11", "NASD11", "USTK11", "TECK11", "SPXB
 const INTL_ETFS = new Set(["XINA11", "EURP11", "ASIA11", "EMER11", "ACWI11", "WRLD11"]);
 // BDRs terminam em 31–35 ou 39 (ETFs de BDR)
 const BDR_SUFFIX = /(31|32|33|34|35|39)$/;
+// Listados nos EUA mas com exposição fora dos EUA: ETFs ex-US e ADRs comuns.
+const INTL_US_LISTED = new Set([
+  "VXUS", "VEA", "VWO", "IEMG", "EFA", "EEM", "IXUS", "ACWX", "VEU", "IEFA", "EWZ",
+  "TSM", "ASML", "NVO", "SAP", "TM", "SONY", "BABA", "SHOP", "MELI", "NU",
+]);
 
 export function suggestAllocation(asset: AssetRow): AllocationSuggestion {
   const slug = asset.asset_classes?.slug;
@@ -142,10 +139,15 @@ export function suggestAllocation(asset: AssetRow): AllocationSuggestion {
     case "bitcoin":
     case "cripto":
       return { categorySlug: "cripto", ...keep, reason: "cripto" };
-    case "acoes_eua":
-      return { categorySlug: "acoes_eua", ...keep, reason: "ação americana" };
-    case "internacional":
-      return { categorySlug: "internacional", ...keep, reason: "internacional" };
+    case "bolsa_eua":
+      if (INTL_US_LISTED.has(ticker)) {
+        return {
+          categorySlug: "internacional",
+          ...keep,
+          reason: "listado nos EUA com exposição a outros mercados",
+        };
+      }
+      return { categorySlug: "acoes_eua", ...keep, reason: "ativo da bolsa americana" };
     case "acoes":
       if (US_ETFS.has(ticker)) {
         return { categorySlug: "acoes_eua", ...keep, reason: "ETF de mercado americano" };

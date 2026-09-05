@@ -17,6 +17,13 @@ export function formatBRL(value: number): string {
   }).format(value);
 }
 
+export function formatUSD(value: number): string {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "USD",
+  }).format(value);
+}
+
 export function formatPercent(value: number, digits = 1): string {
   return `${new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: digits,

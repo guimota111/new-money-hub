@@ -6,9 +6,17 @@ import { Header } from "@/components/header";
 import { DeleteAssetButton } from "@/components/delete-asset-button";
 import { CategoryPie } from "@/components/charts/pie-chart";
 import { ViewToggle } from "@/components/view-toggle";
-import { formatBRL, formatQuantity } from "@/lib/format";
+import { formatBRL, formatQuantity, formatUSD } from "@/lib/format";
 import { getHouseholdScope } from "@/lib/household";
-import { assetCurrentValue, CLASS_ORDER, type AssetRow } from "@/lib/portfolio";
+import {
+  assetCurrentValue,
+  CLASS_ORDER,
+  INSTRUMENT_SELECT,
+  INSTRUMENT_SELECT_FULL,
+  isCryptoClass,
+  type AssetRow,
+} from "@/lib/portfolio";
+import { isMissingTableError } from "@/lib/supabase/errors";
 import { CLASS_COLOR } from "@/lib/chart-colors";
 import { deleteAsset } from "./actions";
 
@@ -42,7 +50,8 @@ function assetSubtitle(asset: AssetRow): string | null {
     }
     return parts.join(" · ") || null;
   }
-  if (slug === "bitcoin" && meta.local) return String(meta.local);
+  if (isCryptoClass(slug) && meta.local) return String(meta.local);
+  if (slug === "bolsa_eua") return "Bolsa americana · US$";
   return null;
 }
 
@@ -139,13 +148,20 @@ function MarketTable({ assets }: { assets: PageAssetRow[] }) {
       <tbody>
         {assets.map((asset) => {
           const subtitle = assetSubtitle(asset);
-          const price = asset.market_instruments?.current_price;
+          // ativos em dólar: cotação, preço médio e resultado em US$; o valor
+          // da posição continua em BRL (current_price já convertido pela PTAX)
+          const usd = asset.market_instruments?.currency === "USD";
+          const fmt = usd ? formatUSD : formatBRL;
+          const rawPrice = usd
+            ? asset.market_instruments?.current_price_native
+            : asset.market_instruments?.current_price;
+          const price = rawPrice != null ? Number(rawPrice) : null;
           // resultado vs. preço médio pago — só quando há cotação e custo
           const gain =
             price != null && asset.average_price != null && Number(asset.average_price) > 0
               ? {
-                  amount: (Number(price) - Number(asset.average_price)) * Number(asset.quantity),
-                  pct: (Number(price) / Number(asset.average_price) - 1) * 100,
+                  amount: (price - Number(asset.average_price)) * Number(asset.quantity),
+                  pct: (price / Number(asset.average_price) - 1) * 100,
                 }
               : null;
           const gainClass =
@@ -167,16 +183,16 @@ function MarketTable({ assets }: { assets: PageAssetRow[] }) {
                 {formatQuantity(Number(asset.quantity))}
               </td>
               <td className={`${tdClass} text-right text-zinc-700 dark:text-zinc-300`}>
-                {asset.average_price != null ? formatBRL(Number(asset.average_price)) : "—"}
+                {asset.average_price != null ? fmt(Number(asset.average_price)) : "—"}
               </td>
               <td className={`${tdClass} text-right text-zinc-700 dark:text-zinc-300`}>
-                {price != null ? formatBRL(Number(price)) : "—"}
+                {price != null ? fmt(price) : "—"}
               </td>
               <td className={`${tdClass} text-right font-medium text-zinc-950 dark:text-zinc-50`}>
                 {formatBRL(assetCurrentValue(asset))}
               </td>
               <td className={`${tdClass} text-right font-medium ${gainClass}`}>
-                {gain ? `${gain.amount >= 0 ? "+" : ""}${formatBRL(gain.amount)}` : "—"}
+                {gain ? `${gain.amount >= 0 ? "+" : ""}${fmt(gain.amount)}` : "—"}
               </td>
               <td className={`${tdClass} text-right ${gainClass}`}>
                 {gain ? `${gain.pct >= 0 ? "+" : ""}${gain.pct.toFixed(1)}%` : "—"}
@@ -208,13 +224,19 @@ export default async function AssetsPage({
     getHouseholdScope(supabase, user.id, visao),
   ]);
 
-  const { data } = await supabase
-    .from("assets")
-    .select(
-      "id, user_id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(ticker, current_price, current_price_updated_at)",
-    )
-    .in("user_id", scope.userIds)
-    .order("quantity", { ascending: false });
+  // moeda e preço nativo vêm da migração 0008; sem ela, cai na seleção básica
+  const selectAssets = (instrumentColumns: string) =>
+    supabase
+      .from("assets")
+      .select(
+        `id, user_id, name, quantity, average_price, purchase_date, metadata, asset_classes(name, slug), market_instruments(${instrumentColumns})`,
+      )
+      .in("user_id", scope.userIds)
+      .order("quantity", { ascending: false });
+  const first = await selectAssets(INSTRUMENT_SELECT_FULL);
+  const data = isMissingTableError(first.error)
+    ? (await selectAssets(INSTRUMENT_SELECT)).data
+    : first.data;
 
   const assets = ((data ?? []) as unknown as (AssetRow & { user_id: string })[]).map(
     (a): PageAssetRow => ({

@@ -2,9 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   fetchBrapiQuote,
+  fetchCryptoBRL,
+  fetchFinnhubQuote,
+  fetchPtaxUsdBrl,
   fetchTesouroDiretoPrices,
-  fetchBitcoinBRL,
 } from "@/lib/prices";
+import { isCryptoClass, isUsClass } from "@/lib/portfolio";
+import { isMissingTableError } from "@/lib/supabase/errors";
 
 export const maxDuration = 120;
 
@@ -15,6 +19,18 @@ interface InstrumentRow {
   asset_classes: { slug: string } | null;
 }
 
+// current_price é sempre BRL; native é o preço na moeda do ativo (igual ao
+// BRL para tudo que não é bolsa americana)
+interface PriceUpdate {
+  id: string;
+  price: number;
+  native: number;
+  currency: "BRL" | "USD";
+  source: string;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -23,10 +39,13 @@ export async function GET(request: NextRequest) {
 
   const admin = createAdminClient();
   const brapiToken = process.env.BRAPI_TOKEN ?? "";
+  const finnhubToken = process.env.FINNHUB_TOKEN ?? "";
   const summary = {
     quotes: 0,
     treasury: 0,
-    bitcoin: 0,
+    us: 0,
+    crypto: 0,
+    fx: null as number | null,
     snapshots: 0,
     errors: [] as string[],
   };
@@ -74,7 +93,41 @@ export async function GET(request: NextRequest) {
   const instruments = (instrumentData ?? []) as unknown as InstrumentRow[];
 
   const now = new Date().toISOString();
-  const priceUpdates: { id: string; price: number; source: string }[] = [];
+  const priceUpdates: PriceUpdate[] = [];
+
+  // ---- migração 0008 (fx_rates + colunas de moeda) já rodou? --------------
+  const fxProbe = await admin.from("fx_rates").select("pair").limit(1);
+  const fxReady = !isMissingTableError(fxProbe.error);
+
+  // ---- câmbio PTAX (Banco Central) ----------------------------------------
+  let usdBrl: number | null = null;
+  if (fxReady) {
+    try {
+      const ptax = await fetchPtaxUsdBrl();
+      if (ptax) {
+        usdBrl = ptax.rate;
+        summary.fx = ptax.rate;
+        const { error } = await admin.from("fx_rates").upsert(
+          { pair: "USDBRL", rate: ptax.rate, rate_date: ptax.date, source: "bcb_ptax", fetched_at: now },
+          { onConflict: "pair" },
+        );
+        if (error) summary.errors.push(`fx_rates: ${error.message}`);
+      } else {
+        summary.errors.push("PTAX indisponível no Banco Central");
+      }
+    } catch (e) {
+      summary.errors.push(`ptax: ${e instanceof Error ? e.message : "erro"}`);
+    }
+    if (usdBrl == null) {
+      // sem PTAX nova, usa a última gravada
+      const { data: last } = await admin
+        .from("fx_rates")
+        .select("rate")
+        .eq("pair", "USDBRL")
+        .maybeSingle();
+      if (last?.rate != null) usdBrl = Number(last.rate);
+    }
+  }
 
   // ---- ações / FIIs via brapi --------------------------------------------
   const tickerInstruments = instruments.filter(
@@ -87,7 +140,7 @@ export async function GET(request: NextRequest) {
       try {
         const price = await fetchBrapiQuote(instrument.ticker!, brapiToken);
         if (price != null) {
-          priceUpdates.push({ id: instrument.id, price, source: "brapi" });
+          priceUpdates.push({ id: instrument.id, price, native: price, currency: "BRL", source: "brapi" });
           summary.quotes++;
         } else {
           summary.errors.push(`sem cotação: ${instrument.ticker}`);
@@ -112,7 +165,7 @@ export async function GET(request: NextRequest) {
       for (const instrument of treasuryInstruments) {
         const price = treasuryPrices.get(instrument.external_id!.trim());
         if (price != null) {
-          priceUpdates.push({ id: instrument.id, price, source: "tesouro_transparente" });
+          priceUpdates.push({ id: instrument.id, price, native: price, currency: "BRL", source: "tesouro_transparente" });
           summary.treasury++;
         } else {
           summary.errors.push(`título não encontrado no CSV: ${instrument.external_id}`);
@@ -123,16 +176,57 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ---- Bitcoin via CoinGecko ---------------------------------------------
-  const btcInstrument = instruments.find(
-    (i) => i.asset_classes?.slug === "bitcoin" && i.ticker === "BTC",
+  // ---- bolsa americana via Finnhub (US$ → BRL pela PTAX) -----------------
+  const usInstruments = instruments.filter((i) => i.ticker && isUsClass(i.asset_classes?.slug));
+  if (usInstruments.length > 0) {
+    if (!fxReady) {
+      summary.errors.push("bolsa americana: rode supabase/migrations/0008_bolsa_eua_fx_cripto.sql");
+    } else if (!finnhubToken) {
+      summary.errors.push("FINNHUB_TOKEN não configurado — bolsa americana não atualizada");
+    } else if (usdBrl == null) {
+      summary.errors.push("sem câmbio USD/BRL — bolsa americana não atualizada");
+    } else {
+      for (const instrument of usInstruments) {
+        try {
+          const usd = await fetchFinnhubQuote(instrument.ticker!, finnhubToken);
+          if (usd != null) {
+            priceUpdates.push({
+              id: instrument.id,
+              price: usd * usdBrl,
+              native: usd,
+              currency: "USD",
+              source: "finnhub",
+            });
+            summary.us++;
+          } else {
+            summary.errors.push(`sem cotação: ${instrument.ticker}`);
+          }
+        } catch (e) {
+          summary.errors.push(
+            `finnhub ${instrument.ticker}: ${e instanceof Error ? e.message : "erro"}`,
+          );
+        }
+        // plano grátis: 60 chamadas/min
+        await sleep(150);
+      }
+    }
+  }
+
+  // ---- cripto (BTC, ETH) via CoinGecko -----------------------------------
+  const cryptoInstruments = instruments.filter(
+    (i) => i.ticker && isCryptoClass(i.asset_classes?.slug),
   );
-  if (btcInstrument) {
+  if (cryptoInstruments.length > 0) {
     try {
-      const price = await fetchBitcoinBRL();
-      if (price != null) {
-        priceUpdates.push({ id: btcInstrument.id, price, source: "coingecko" });
-        summary.bitcoin++;
+      const cryptoPrices = await fetchCryptoBRL(cryptoInstruments.map((i) => i.ticker!));
+      for (const instrument of cryptoInstruments) {
+        const price = cryptoPrices.get(instrument.ticker!);
+        if (price != null) {
+          priceUpdates.push({ id: instrument.id, price, native: price, currency: "BRL", source: "coingecko" });
+          summary.crypto++;
+        } else {
+          summary.errors.push(`sem cotação cripto: ${instrument.ticker}`);
+        }
       }
     } catch (e) {
       summary.errors.push(`coingecko: ${e instanceof Error ? e.message : "erro"}`);
@@ -141,10 +235,15 @@ export async function GET(request: NextRequest) {
 
   // ---- grava preços + histórico ------------------------------------------
   for (const update of priceUpdates) {
-    await admin
-      .from("market_instruments")
-      .update({ current_price: update.price, current_price_updated_at: now })
-      .eq("id", update.id);
+    const patch: Record<string, unknown> = {
+      current_price: update.price,
+      current_price_updated_at: now,
+    };
+    if (fxReady) {
+      patch.current_price_native = update.native;
+      patch.currency = update.currency;
+    }
+    await admin.from("market_instruments").update(patch).eq("id", update.id);
   }
   if (priceUpdates.length > 0) {
     await admin.from("instrument_price_history").insert(

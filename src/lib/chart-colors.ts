@@ -7,6 +7,8 @@ export const CLASS_COLOR: Record<string, string> = {
   renda_fixa: "var(--series-3)",
   conta_corrente: "var(--series-4)",
   bitcoin: "var(--series-5)",
+  cripto: "var(--series-5)",
+  bolsa_eua: "var(--series-7)",
 };
 
 export const INCOME_COLOR: Record<string, string> = {

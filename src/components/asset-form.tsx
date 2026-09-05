@@ -86,9 +86,68 @@ export function AssetForm({ classSlug, action, submitLabel, defaults }: AssetFor
         </>
       )}
 
-      {classSlug === "bitcoin" && (
+      {classSlug === "bolsa_eua" && (
         <>
-          <Field label="Quantidade de BTC">
+          <Field label="Símbolo (ticker nos EUA)">
+            <input
+              name="ticker"
+              required
+              placeholder="Ex: AAPL, VOO, VXUS"
+              defaultValue={defaults?.ticker ?? ""}
+              className={`${inputClass} uppercase`}
+            />
+          </Field>
+          <Field label="Quantidade (aceita fração)">
+            <input
+              name="quantity"
+              required
+              inputMode="decimal"
+              placeholder="Ex: 2,5"
+              defaultValue={defaults?.quantity ?? ""}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Preço médio (US$)">
+            <input
+              name="average_price"
+              required
+              inputMode="decimal"
+              placeholder="Ex: 187,40"
+              defaultValue={defaults?.average_price ?? ""}
+              className={inputClass}
+            />
+          </Field>
+          <Field label="Data de compra (opcional)">
+            <input
+              name="purchase_date"
+              type="date"
+              defaultValue={defaults?.purchase_date ?? ""}
+              className={inputClass}
+            />
+          </Field>
+          <p className="text-xs text-zinc-500">
+            Cotação pela Finnhub e conversão para reais pela PTAX do dia. Se a
+            exposição é EUA ou Internacional você define no Consultor.
+          </p>
+        </>
+      )}
+
+      {(classSlug === "bitcoin" || classSlug === "cripto") && (
+        <>
+          {classSlug === "cripto" && (
+            <Field label="Moeda">
+              <select
+                name="moeda"
+                required
+                defaultValue={defaults?.ticker ?? "BTC"}
+                className={inputClass}
+              >
+                <option value="BTC">Bitcoin (BTC)</option>
+                <option value="ETH">Ethereum (ETH)</option>
+              </select>
+            </Field>
+          )}
+          <Field label={classSlug === "cripto" ? "Quantidade" : "Quantidade de BTC"}>
             <input
               name="quantity"
               required
@@ -98,7 +157,7 @@ export function AssetForm({ classSlug, action, submitLabel, defaults }: AssetFor
               className={inputClass}
             />
           </Field>
-          <Field label="Preço médio pago por BTC (R$, opcional)">
+          <Field label="Preço médio pago por unidade (R$, opcional)">
             <input
               name="average_price"
               inputMode="decimal"
