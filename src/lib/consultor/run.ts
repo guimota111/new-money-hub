@@ -32,6 +32,7 @@ import {
   saveVerdicts,
 } from "@/lib/news/cache";
 import { addUsage, emptyUsage, MODELS, runStructured, runText } from "./ai";
+import { reconcilePreviousRuns } from "./followup";
 import {
   buildNarrativePrompt,
   buildNewsPrompt,
@@ -50,6 +51,7 @@ import type {
   NewsHeadline,
   NewsTarget,
   NewsVerdict,
+  PositionSnapshot,
   PreparedCategory,
   PreparedState,
   RunRow,
@@ -391,6 +393,21 @@ async function stepPrepare(supabase: SupabaseClient, userId: string, run: RunRow
     .map((a) => a.market_instruments!.ticker!.toUpperCase());
   const index = buildFundamentalsIndex(fundamentals.rows, usHeld);
 
+  // foto das posições com ticker (qualquer classe): base para saber, na
+  // próxima rodada, o que desta foi acatado
+  const positions: PositionSnapshot = {};
+  for (const a of allocation.assets) {
+    const ticker = a.market_instruments?.ticker?.toUpperCase();
+    if (!ticker) continue;
+    const key = `${isUsClass(a.asset_classes?.slug) ? "US" : "BR"}:${ticker}`;
+    const prev = positions[key] ?? { quantity: 0, valueBrl: 0 };
+    positions[key] = {
+      quantity: prev.quantity + Number(a.quantity),
+      valueBrl: prev.valueBrl + assetCurrentValue(a),
+    };
+  }
+  const previous = await reconcilePreviousRuns(supabase, userId, run.created_at, positions);
+
   const prepared: PreparedState = {
     level1: toLevel1(report),
     fxRate,
@@ -399,6 +416,8 @@ async function stepPrepare(supabase: SupabaseClient, userId: string, run: RunRow
     categories: [],
     skipped: [],
     watchlist: [],
+    positions,
+    previous,
   };
   const globalCapLeft = Math.max(0, settings.max_total_assets - report.totalAssetCount);
 
@@ -717,6 +736,7 @@ function buildReport(state: RunState): Record<string, unknown> {
     skipped: state.prepared?.skipped ?? [],
     shopping: state.shopping ?? null,
     news: state.news ?? null,
+    previous: state.prepared?.previous ?? null,
     usage: state.usage,
   };
 }

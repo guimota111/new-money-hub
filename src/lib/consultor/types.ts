@@ -107,6 +107,34 @@ export interface NewsVerdict {
   cached: boolean;
 }
 
+/** quantidade por "MERCADO:TICKER" no momento da rodada; base da detecção de acatamento */
+export type PositionSnapshot = Record<string, { quantity: number; valueBrl: number }>;
+
+export type RecommendationStatus = "pending" | "executed" | "partial" | "ignored";
+
+export interface PreviousRecommendation {
+  type: ShoppingType;
+  category: string | null;
+  ticker: string;
+  amountBrl: number | null;
+  quantity: number | null;
+  rationale: string | null;
+  status: RecommendationStatus;
+  statusSource: "auto" | "manual";
+}
+
+// Resumo da última rodada concluída, para a IA não se repetir e para o
+// relatório mostrar o que foi acatado.
+export interface PreviousRunSummary {
+  runId: string;
+  createdAt: string;
+  contribution: number;
+  mode: "standard" | "full";
+  recommendations: PreviousRecommendation[];
+  counts: Record<RecommendationStatus, number>;
+  narrativeExcerpt: string | null;
+}
+
 export interface PreparedState {
   level1: Level1Summary;
   fxRate: number | null;
@@ -115,6 +143,8 @@ export interface PreparedState {
   categories: PreparedCategory[];
   skipped: { slug: string; name: string; reason: string }[];
   watchlist: NewsTarget[];
+  positions: PositionSnapshot;
+  previous: PreviousRunSummary | null;
 }
 
 export type ShoppingType = "buy" | "reinforce" | "trim" | "sell" | "watch" | "substitute" | "alternative";

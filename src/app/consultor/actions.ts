@@ -222,6 +222,27 @@ export async function retryAnalysis(runId: string): Promise<RunSnapshot> {
   return retryRun(supabase, user.id, runId);
 }
 
+// Correção manual do acatamento de uma recomendação (a detecção automática
+// não sobrescreve marcação manual).
+export async function setRecommendationStatus(
+  recommendationId: string,
+  status: "pending" | "executed" | "partial" | "ignored",
+): Promise<{ error: string | null }> {
+  const { supabase, user } = await requireUser();
+  const { error } = await supabase
+    .from("analysis_recommendations")
+    .update({
+      status,
+      status_source: "manual",
+      resolved_at: status === "pending" ? null : new Date().toISOString(),
+    })
+    .eq("id", recommendationId)
+    .eq("user_id", user.id);
+  if (error) return { error: describe(error) };
+  revalidatePath("/consultor/historico");
+  return { error: null };
+}
+
 // ---- classificação dos ativos ---------------------------------------------
 
 export interface AssetAllocationInput {

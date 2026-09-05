@@ -6,9 +6,33 @@ import type {
   NewsVerdict,
   PreparedCategory,
   PreparedState,
+  PreviousRecommendation,
+  RecommendationStatus,
   ShoppingState,
 } from "./types";
 import type { RankingOutput } from "./schemas";
+
+export const STATUS_LABEL: Record<RecommendationStatus, string> = {
+  pending: "sem verificação",
+  executed: "executada",
+  partial: "parcial",
+  ignored: "ignorada",
+};
+
+const TYPE_LABEL: Record<PreviousRecommendation["type"], string> = {
+  buy: "compra nova",
+  reinforce: "reforço",
+  trim: "reduzir",
+  sell: "vender",
+  watch: "observar",
+  substitute: "substituir",
+  alternative: "alternativa",
+};
+
+export function describePrevious(r: PreviousRecommendation): string {
+  const amount = r.amountBrl != null ? ` R$ ${r.amountBrl.toFixed(0)}` : "";
+  return `${TYPE_LABEL[r.type]} ${r.ticker}${amount} → ${STATUS_LABEL[r.status]}${r.statusSource === "manual" ? " (marcado pelo investidor)" : ""}`;
+}
 
 export const NEWS_LEVEL_LABEL: Record<NewsVerdict["level"], string> = {
   neutral: "neutro",
@@ -180,6 +204,18 @@ export function buildRankingPrompt(
     for (const h of cat.holdings) lines.push(holdingLine(h, cat.slug, news[`${market}:${h.ticker}`]));
     lines.push("(o veredito de notícias vem de uma leitura das manchetes dos últimos 6 meses; pese junto com os fundamentos ao decidir keep/watch/trim/sell)");
   }
+  const previous = prepared.previous;
+  const previousHere = previous?.recommendations.filter((r) => r.category === cat.slug && r.type !== "watch") ?? [];
+  if (previous && previousHere.length > 0) {
+    lines.push("");
+    lines.push(
+      `RODADA ANTERIOR (${previous.createdAt.slice(0, 10)}, aporte R$ ${previous.contribution.toFixed(0)}): o que foi recomendado para esta caixa e o que o investidor fez desde então:`,
+    );
+    for (const r of previousHere) lines.push(`- ${describePrevious(r)}`);
+    lines.push(
+      "Regra: não repita uma recomendação ignorada sem apontar um motivo novo; se foi parcial, considere completar; o que foi executado já está nas posições acima.",
+    );
+  }
   lines.push("");
   lines.push(
     `CANDIDATOS APROVADOS NO PRÉ-FILTRO (${cat.candidates.length} de ${cat.screen.universe} do universo; cortes: ${cat.screen.rejected.map(([r, n]) => `${n} ${r}`).join(", ") || "nenhum"}):`,
@@ -214,6 +250,12 @@ export function buildNarrativePrompt(
   if (l1.unclassified > 0) lines.push(`Ativos ainda não classificados (fora da análise): ${l1.unclassified}.`);
   if (prepared.skipped.length > 0) {
     lines.push(`Categorias não analisadas pela IA: ${prepared.skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}.`);
+  }
+  if (prepared.previous) {
+    const c = prepared.previous.counts;
+    lines.push(
+      `Rodada anterior (${prepared.previous.createdAt.slice(0, 10)}): ${c.executed} recomendações executadas, ${c.partial} parciais, ${c.ignored} ignoradas, ${c.pending} sem verificação. Mencione a continuidade em uma frase, sem moralizar.`,
+    );
   }
   lines.push("");
   for (const cat of prepared.categories) {

@@ -305,7 +305,11 @@ Cron de preços passa a buscar cotações EUA (Finnhub) e PTAX diária.
    - Modo completo acrescenta `news_finalists` depois do ranking: notícias das compras, alternativas e substituições; veredito não neutro vira flag na recomendação.
    - Vereditos com menos de 7 dias são reaproveitados do cache sem chamar a IA. Custo medido: ~US$ 0,01 por 2 ativos com 12 manchetes cada.
    - Avisos tributários já vinham da entrega 4 (nota por venda/redução).
-6. Histórico, detecção de recomendações acatadas, contexto da rodada anterior.
+6. **Feita (2026-09-05).** Histórico, detecção de recomendações acatadas, contexto da rodada anterior.
+   - Sem migração nova: `analysis_recommendations.status/status_source/resolved_at` já existiam.
+   - A etapa `prepare` guarda uma foto das posições com ticker (`state.prepared.positions`). Na rodada seguinte, `reconcilePreviousRuns` compara essa foto com as posições atuais e marca cada recomendação das últimas 5 rodadas concluídas: compra/reforço executada quando a quantidade subiu ≥ 90% do sugerido, parcial se subiu menos, ignorada se não subiu; reduzir/vender pelo mesmo critério ao contrário; substituição olha os dois lados; alternativa executada se foi comprada; observar não muda. Marcação manual (`status_source = 'manual'`) nunca é sobrescrita.
+   - O resumo da última rodada (recomendações por caixa com status) entra no prompt do ranking com a regra "não repita uma recomendação ignorada sem motivo novo; se parcial, considere completar", e o relatório (Sonnet) recebe a contagem para mencionar a continuidade.
+   - Relatório: coluna "Acatada?" na lista de compras e nos alertas, com select para correção manual; seção "Rodada anterior" com o que foi feito. Página `/consultor/historico` lista todas as rodadas com contagem de acatamento e custo acumulado.
 7. Ingestão CVM DFP/ITR para histórico plurianual de lucro e dívida.
 
 ## 10. Em aberto

@@ -464,6 +464,9 @@ export default async function ConsultorPage({
             <Link href="/consultor/universo" className={linkClass}>
               Universo e pré-filtro
             </Link>
+            <Link href="/consultor/historico" className={linkClass}>
+              Histórico
+            </Link>
           </div>
         </div>
 

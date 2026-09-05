@@ -7,9 +7,16 @@ import { RunDriver } from "@/components/run-driver";
 import { formatBRL, formatPercent, formatUSD } from "@/lib/format";
 import { allocationColor } from "@/lib/chart-colors";
 import { loadRun, snapshotOf } from "@/lib/consultor/run";
-import { NEWS_LEVEL_LABEL } from "@/lib/consultor/prompts";
+import { describePrevious, NEWS_LEVEL_LABEL } from "@/lib/consultor/prompts";
 import { marketOf } from "@/lib/consultor/shopping";
+import type { RecommendationRow } from "@/lib/consultor/followup";
 import type { NewsVerdict, RunRow, ShoppingItem } from "@/lib/consultor/types";
+import { RecommendationStatusCell } from "@/components/recommendation-status";
+
+// recomendações gravadas na etapa de compras, para mostrar e corrigir o status
+function recKey(type: string, category: string | null, ticker: string): string {
+  return `${type}:${category ?? ""}:${ticker}`;
+}
 import { BackLink, card, linkClass, noticeWarn, sectionTitle, td, th } from "../../ui";
 
 // cada etapa da análise roda numa server action chamada desta página; a de IA
@@ -53,7 +60,12 @@ function Badge({ children, className }: { children: React.ReactNode; className?:
   );
 }
 
-function BuyTable({ items }: { items: ShoppingItem[] }) {
+function StatusCell({ rec }: { rec: RecommendationRow | undefined }) {
+  if (!rec) return <span className="text-xs text-zinc-400">—</span>;
+  return <RecommendationStatusCell id={rec.id} status={rec.status} source={rec.status_source} />;
+}
+
+function BuyTable({ items, recs }: { items: ShoppingItem[]; recs: Map<string, RecommendationRow> }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -65,6 +77,7 @@ function BuyTable({ items }: { items: ShoppingItem[] }) {
             <th className={`${th} text-right`}>Qtd. aprox.</th>
             <th className={`${th} text-right`}>Preço usado</th>
             <th className={th}>Por quê</th>
+            <th className={th}>Acatada?</th>
           </tr>
         </thead>
         <tbody>
@@ -88,6 +101,9 @@ function BuyTable({ items }: { items: ShoppingItem[] }) {
               <td className={`${td} text-right tabular-nums text-zinc-700 dark:text-zinc-300`}>{qty(it.quantity)}</td>
               <td className={`${td} text-right tabular-nums text-zinc-700 dark:text-zinc-300`}>{money(it.price, it.currency)}</td>
               <td className={`${td} max-w-md text-zinc-700 dark:text-zinc-300`}>{it.rationale}</td>
+              <td className={td}>
+                <StatusCell rec={recs.get(recKey(it.type, it.category, it.ticker))} />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -96,7 +112,7 @@ function BuyTable({ items }: { items: ShoppingItem[] }) {
   );
 }
 
-function Report({ run }: { run: RunRow }) {
+function Report({ run, recs }: { run: RunRow; recs: Map<string, RecommendationRow> }) {
   const state = run.state;
   const prepared = state.prepared;
   const shopping = state.shopping;
@@ -183,7 +199,7 @@ function Report({ run }: { run: RunRow }) {
         {buys.length === 0 ? (
           <p className="text-sm text-zinc-500">Nenhuma compra sugerida nesta rodada.</p>
         ) : (
-          <BuyTable items={buys} />
+          <BuyTable items={buys} recs={recs} />
         )}
         {shopping.notes.length > 0 && (
           <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-zinc-500">
@@ -193,6 +209,31 @@ function Report({ run }: { run: RunRow }) {
           </ul>
         )}
       </section>
+
+      {prepared.previous && (
+        <section className={card}>
+          <h2 className={sectionTitle}>
+            Rodada anterior · {new Date(prepared.previous.createdAt).toLocaleDateString("pt-BR")} ·{" "}
+            {prepared.previous.counts.executed} executada{prepared.previous.counts.executed === 1 ? "" : "s"},{" "}
+            {prepared.previous.counts.partial} parcia{prepared.previous.counts.partial === 1 ? "l" : "is"},{" "}
+            {prepared.previous.counts.ignored} ignorada{prepared.previous.counts.ignored === 1 ? "" : "s"}
+          </h2>
+          <ul className="space-y-1 text-sm text-zinc-700 dark:text-zinc-300">
+            {prepared.previous.recommendations
+              .filter((r) => r.type !== "watch")
+              .map((r, i) => (
+                <li key={`${r.type}-${r.ticker}-${i}`}>{describePrevious(r)}</li>
+              ))}
+          </ul>
+          <p className="mt-3 text-xs text-zinc-500">
+            Detectado pela diferença de posições entre as duas rodadas. Corrija o status na{" "}
+            <Link href={`/consultor/analise/${prepared.previous.runId}`} className="underline">
+              análise anterior
+            </Link>{" "}
+            se algo não bater. A IA recebeu esta lista para não repetir o que você ignorou sem motivo novo.
+          </p>
+        </section>
+      )}
 
       {(sales.length > 0 || watches.length > 0 || subs.length > 0) && (
         <section className={card}>
@@ -215,6 +256,7 @@ function Report({ run }: { run: RunRow }) {
                   {it.flags.map((f) => (
                     <Badge key={f}>{f}</Badge>
                   ))}
+                  {it.type !== "watch" && <StatusCell rec={recs.get(recKey(it.type, it.category, it.ticker))} />}
                 </div>
                 <p className="mt-1 text-zinc-700 dark:text-zinc-300">{it.rationale}</p>
                 {it.taxNote && <p className="mt-0.5 text-xs text-zinc-500">Imposto: {it.taxNote}.</p>}
@@ -380,11 +422,16 @@ export default async function AnalisePage({ params }: { params: Promise<{ id: st
   const user = await getSessionUser(supabase);
   if (!user) redirect("/login");
 
-  const [{ data: profile }, run] = await Promise.all([
+  const [{ data: profile }, run, recRes] = await Promise.all([
     supabase.from("profiles").select("name").eq("id", user.id).single(),
     loadRun(supabase, user.id, id),
+    supabase.from("analysis_recommendations").select("*").eq("run_id", id).eq("user_id", user.id),
   ]);
   if (!run) redirect("/consultor?erro=" + encodeURIComponent("Análise não encontrada."));
+  const recs = new Map<string, RecommendationRow>();
+  for (const r of (recRes.data ?? []) as RecommendationRow[]) {
+    recs.set(recKey(r.type, r.category_slug, r.ticker), r);
+  }
 
   const created = new Date(run.created_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
@@ -416,7 +463,7 @@ export default async function AnalisePage({ params }: { params: Promise<{ id: st
           </section>
         )}
 
-        {run.status === "done" && <Report run={run} />}
+        {run.status === "done" && <Report run={run} recs={recs} />}
       </main>
     </div>
   );
