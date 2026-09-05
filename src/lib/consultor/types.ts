@@ -78,6 +78,35 @@ export interface Level1Summary {
   unclassified: number;
 }
 
+// Ativo que merece checagem de notícias: toda posição atual com ticker nas
+// categorias selecionáveis, mesmo fora das caixas analisadas nesta rodada.
+export interface NewsTarget {
+  ticker: string;
+  market: "BR" | "US";
+  name: string | null;
+  categorySlug: string;
+  categoryName: string;
+  /** true quando a categoria não entrou no ranking (só alerta de notícia) */
+  outsideAnalysis: boolean;
+}
+
+export interface NewsHeadline {
+  title: string;
+  url: string;
+  source: string | null;
+  publishedAt: string | null;
+}
+
+export interface NewsVerdict {
+  level: "neutral" | "attention" | "concerning";
+  recurring: boolean;
+  summary: string;
+  themes: string[];
+  headlines: NewsHeadline[];
+  /** true quando veio do cache (classificado em rodada anterior, < 7 dias) */
+  cached: boolean;
+}
+
 export interface PreparedState {
   level1: Level1Summary;
   fxRate: number | null;
@@ -85,6 +114,7 @@ export interface PreparedState {
   totalAssetCount: number;
   categories: PreparedCategory[];
   skipped: { slug: string; name: string; reason: string }[];
+  watchlist: NewsTarget[];
 }
 
 export type ShoppingType = "buy" | "reinforce" | "trim" | "sell" | "watch" | "substitute" | "alternative";
@@ -112,10 +142,12 @@ export interface ShoppingState {
 }
 
 export interface RunState {
-  /** etapas na ordem: prepare, rank:<slug>..., shopping, narrative */
+  /** etapas na ordem: prepare, news, rank:<slug>..., [news_finalists], shopping, narrative */
   plan: string[];
   done: string[];
   prepared?: PreparedState;
+  /** veredito de notícias por "MERCADO:TICKER" (posições e, no modo completo, finalistas) */
+  news?: Record<string, NewsVerdict>;
   rankings?: Record<string, RankingOutput>;
   shopping?: ShoppingState;
   narrative?: string;

@@ -7,7 +7,9 @@ import { RunDriver } from "@/components/run-driver";
 import { formatBRL, formatPercent, formatUSD } from "@/lib/format";
 import { allocationColor } from "@/lib/chart-colors";
 import { loadRun, snapshotOf } from "@/lib/consultor/run";
-import type { RunRow, ShoppingItem } from "@/lib/consultor/types";
+import { NEWS_LEVEL_LABEL } from "@/lib/consultor/prompts";
+import { marketOf } from "@/lib/consultor/shopping";
+import type { NewsVerdict, RunRow, ShoppingItem } from "@/lib/consultor/types";
 import { BackLink, card, linkClass, noticeWarn, sectionTitle, td, th } from "../../ui";
 
 // cada etapa da análise roda numa server action chamada desta página; a de IA
@@ -26,6 +28,12 @@ const VERDICT_CLASS: Record<string, string> = {
   trim: "border-red-300 text-red-700 dark:border-red-800 dark:text-red-400",
   sell: "border-red-300 text-red-700 dark:border-red-800 dark:text-red-400",
 };
+const NEWS_CLASS: Record<NewsVerdict["level"], string> = {
+  neutral: "border-zinc-200 text-zinc-500 dark:border-zinc-800",
+  attention: "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400",
+  concerning: "border-red-300 text-red-700 dark:border-red-800 dark:text-red-400",
+};
+const NEWS_ORDER: Record<NewsVerdict["level"], number> = { concerning: 0, attention: 1, neutral: 2 };
 
 function money(value: number | null, currency: "BRL" | "USD"): string {
   if (value == null) return "—";
@@ -99,6 +107,11 @@ function Report({ run }: { run: RunRow }) {
   const watches = shopping.items.filter((i) => i.type === "watch");
   const subs = shopping.items.filter((i) => i.type === "substitute");
   const usage = state.usage;
+  const news = state.news ?? {};
+  const newsEntries = Object.entries(news).sort(
+    (a, b) => NEWS_ORDER[a[1].level] - NEWS_ORDER[b[1].level] || a[0].localeCompare(b[0]),
+  );
+  const newsFor = (slug: string, ticker: string): NewsVerdict | undefined => news[`${marketOf(slug)}:${ticker}`];
 
   return (
     <>
@@ -211,6 +224,55 @@ function Report({ run }: { run: RunRow }) {
         </section>
       )}
 
+      {newsEntries.length > 0 && (
+        <section className={card}>
+          <h2 className={sectionTitle}>Notícias · últimos 6 meses</h2>
+          <ul className="space-y-3">
+            {newsEntries.map(([key, v]) => {
+              const [market, ticker] = key.split(":");
+              const target = prepared.watchlist.find((w) => w.market === market && w.ticker === ticker);
+              return (
+                <li key={key} className="text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-zinc-950 dark:text-zinc-50">{ticker}</span>
+                    <Badge className={NEWS_CLASS[v.level]}>
+                      {NEWS_LEVEL_LABEL[v.level]}
+                      {v.recurring ? " · recorrente" : ""}
+                    </Badge>
+                    {target && <span className="text-xs text-zinc-500">{target.categoryName}</span>}
+                    {!target && <span className="text-xs text-zinc-500">finalista</span>}
+                    {target?.outsideAnalysis && <Badge>fora das caixas analisadas</Badge>}
+                    {v.cached && <Badge>veredito de rodada anterior</Badge>}
+                    {v.themes.map((t) => (
+                      <Badge key={t}>{t}</Badge>
+                    ))}
+                  </div>
+                  <p className="mt-0.5 text-zinc-700 dark:text-zinc-300">{v.summary}</p>
+                  {v.headlines.length > 0 && (
+                    <details className="mt-1 text-xs text-zinc-500">
+                      <summary className="cursor-pointer select-none">
+                        {v.headlines.length} manchete{v.headlines.length === 1 ? "" : "s"}
+                      </summary>
+                      <ul className="mt-1 space-y-0.5">
+                        {v.headlines.slice(0, 10).map((h) => (
+                          <li key={h.url}>
+                            <a href={h.url} target="_blank" rel="noreferrer" className="underline">
+                              {h.title}
+                            </a>
+                            {h.source ? ` · ${h.source}` : ""}
+                            {h.publishedAt ? ` · ${new Date(h.publishedAt).toLocaleDateString("pt-BR")}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       {prepared.categories.map((cat) => {
         const r = state.rankings?.[cat.slug];
         if (!r) return null;
@@ -227,6 +289,7 @@ function Report({ run }: { run: RunRow }) {
                 <ul className="space-y-2">
                   {r.holdings_review.map((h) => {
                     const holding = cat.holdings.find((x) => x.ticker === h.ticker);
+                    const v = newsFor(cat.slug, h.ticker);
                     return (
                       <li key={h.ticker} className="text-sm">
                         <div className="flex flex-wrap items-center gap-2">
@@ -243,6 +306,15 @@ function Report({ run }: { run: RunRow }) {
                           )}
                         </div>
                         <p className="mt-0.5 text-zinc-700 dark:text-zinc-300">{h.rationale}</p>
+                        {v && v.level !== "neutral" && (
+                          <p className="mt-0.5 text-xs text-zinc-500">
+                            <span className={`rounded-full border px-1.5 py-0.5 ${NEWS_CLASS[v.level]}`}>
+                              notícias: {NEWS_LEVEL_LABEL[v.level]}
+                              {v.recurring ? " · recorrente" : ""}
+                            </span>{" "}
+                            {v.summary}
+                          </p>
+                        )}
                       </li>
                     );
                   })}

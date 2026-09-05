@@ -42,3 +42,21 @@ export const RankingSchema = z.object({
 });
 
 export type RankingOutput = z.infer<typeof RankingSchema>;
+
+// Classificação das manchetes por ativo (Sonnet 5, uma chamada para todos).
+export const NewsVerdictSchema = z.object({
+  verdicts: z.array(
+    z.object({
+      ticker: z.string(),
+      /** neutral = ruído/cotação; attention = sinal isolado relevante; concerning = recorrente e relevante para a tese */
+      level: z.enum(["neutral", "attention", "concerning"]),
+      recurring: z.boolean(),
+      /** 1 a 2 frases em português com o que pesou */
+      summary: z.string(),
+      /** ex.: "endividamento", "governança", "regulação", "resultado" */
+      themes: z.array(z.string()),
+    }),
+  ),
+});
+
+export type NewsVerdictOutput = z.infer<typeof NewsVerdictSchema>;

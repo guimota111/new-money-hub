@@ -22,15 +22,34 @@ import {
 import type { Fundamentals } from "@/lib/fundamentals/types";
 import { universeEntryFor } from "@/lib/fundamentals/universe";
 import { fetchFinnhubQuote, fetchPtaxUsdBrl } from "@/lib/prices";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isMissingTableError } from "@/lib/supabase/errors";
+import {
+  collectHeadlines,
+  loadNewsCache,
+  MIGRATION_FILE_0011,
+  newsKey,
+  saveVerdicts,
+} from "@/lib/news/cache";
 import { addUsage, emptyUsage, MODELS, runStructured, runText } from "./ai";
-import { buildNarrativePrompt, buildRankingPrompt, NARRATIVE_SYSTEM, RANKING_SYSTEM } from "./prompts";
-import { RankingSchema, type RankingOutput } from "./schemas";
+import {
+  buildNarrativePrompt,
+  buildNewsPrompt,
+  buildRankingPrompt,
+  NARRATIVE_SYSTEM,
+  NEWS_LEVEL_LABEL,
+  NEWS_SYSTEM,
+  RANKING_SYSTEM,
+} from "./prompts";
+import { NewsVerdictSchema, RankingSchema, type RankingOutput } from "./schemas";
 import { buildShoppingList, marketOf } from "./shopping";
 import type {
   CompactAsset,
   CompactHolding,
   Level1Summary,
+  NewsHeadline,
+  NewsTarget,
+  NewsVerdict,
   PreparedCategory,
   PreparedState,
   RunRow,
@@ -49,6 +68,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function stepLabel(step: string, categoryNames: Record<string, string> = {}): string {
   if (step === "prepare") return "Lendo carteira, metas e universo";
+  if (step === "news") return "Lendo notícias das posições";
+  if (step === "news_finalists") return "Lendo notícias dos finalistas";
   if (step === "shopping") return "Montando a lista de compras";
   if (step === "narrative") return "Escrevendo o relatório";
   if (step.startsWith("rank:")) {
@@ -156,6 +177,10 @@ export async function advanceRun(supabase: SupabaseClient, userId: string, runId
       // nada a fazer: encerra
     } else if (step === "prepare") {
       await stepPrepare(supabase, userId, run, state);
+    } else if (step === "news") {
+      await stepNews(supabase, state);
+    } else if (step === "news_finalists") {
+      await stepNewsFinalists(supabase, state);
     } else if (step.startsWith("rank:")) {
       await stepRank(state, step.slice(5), run.mode);
     } else if (step === "shopping") {
@@ -373,6 +398,7 @@ async function stepPrepare(supabase: SupabaseClient, userId: string, run: RunRow
     totalAssetCount: report.totalAssetCount,
     categories: [],
     skipped: [],
+    watchlist: [],
   };
   const globalCapLeft = Math.max(0, settings.max_total_assets - report.totalAssetCount);
 
@@ -418,8 +444,145 @@ async function stepPrepare(supabase: SupabaseClient, userId: string, run: RunRow
     });
   }
 
+  // toda posição com ticker nas categorias selecionáveis entra na checagem de
+  // notícias, mesmo fora das caixas analisadas nesta rodada (poda por notícia)
+  const analyzed = new Set(prepared.categories.map((c) => c.slug));
+  for (const cr of report.categories) {
+    const slug = cr.category.slug;
+    if (!(SCREEN_CATEGORIES as string[]).includes(slug)) continue;
+    const market = marketOf(slug);
+    for (const a of allocation.assets) {
+      if (a.allocation_category_id !== cr.category.id || a.allocation_excluded || !a.market_instruments?.ticker) continue;
+      const ticker = a.market_instruments.ticker.toUpperCase();
+      if (prepared.watchlist.some((w) => w.market === market && w.ticker === ticker)) continue;
+      prepared.watchlist.push({
+        ticker,
+        market,
+        name: index.byKey.get(`${market}:${ticker}`)?.name ?? (a.name !== ticker ? a.name : null),
+        categorySlug: slug,
+        categoryName: cr.category.name,
+        outsideAnalysis: !analyzed.has(slug),
+      });
+    }
+  }
+
   state.prepared = prepared;
-  state.plan = ["prepare", ...prepared.categories.map((c) => `rank:${c.slug}`), "shopping", "narrative"];
+  const newsSteps = prepared.watchlist.length > 0 ? ["news"] : [];
+  const finalistSteps = run.mode === "full" && prepared.categories.length > 0 ? ["news_finalists"] : [];
+  state.plan = [
+    "prepare",
+    ...newsSteps,
+    ...prepared.categories.map((c) => `rank:${c.slug}`),
+    ...finalistSteps,
+    "shopping",
+    "narrative",
+  ];
+}
+
+// ---- notícias: manchetes (Google News / Brave) + classificação (Sonnet 5) --
+
+async function classifyNews(supabase: SupabaseClient, state: RunState, targets: NewsTarget[]) {
+  if (targets.length === 0) return;
+  const admin = createAdminClient();
+  const cache = await loadNewsCache(supabase, targets);
+  if (!cache.ready) throw new Error(`Rode ${MIGRATION_FILE_0011} no SQL editor do Supabase.`);
+  const collected = await collectHeadlines(admin, targets, cache.rows);
+
+  const news: Record<string, NewsVerdict> = { ...(state.news ?? {}) };
+  const pending: { target: NewsTarget; headlines: NewsHeadline[] }[] = [];
+  for (const target of targets) {
+    const key = newsKey(target.market, target.ticker);
+    const headlines = collected.headlines.get(key) ?? [];
+    const cachedVerdict = collected.cachedVerdicts.get(key);
+    if (cachedVerdict) {
+      news[key] = { ...cachedVerdict, headlines, cached: true };
+      continue;
+    }
+    if (headlines.length === 0) {
+      news[key] = {
+        level: "neutral",
+        recurring: false,
+        summary: "Nenhuma manchete encontrada nos últimos 6 meses.",
+        themes: [],
+        headlines,
+        cached: false,
+      };
+      continue;
+    }
+    pending.push({ target, headlines });
+  }
+
+  const fresh = new Map<string, NewsVerdict>();
+  for (let i = 0; i < pending.length; i += 25) {
+    const chunk = pending.slice(i, i + 25);
+    const { data, usage } = await runStructured({
+      model: MODELS.narrative,
+      system: NEWS_SYSTEM,
+      user: buildNewsPrompt(chunk),
+      schema: NewsVerdictSchema,
+      maxTokens: 8_000,
+      effort: "medium",
+    });
+    state.usage = addUsage(state.usage, usage);
+    const byTicker = new Map(data.verdicts.map((v) => [v.ticker.trim().toUpperCase(), v]));
+    for (const { target, headlines } of chunk) {
+      const key = newsKey(target.market, target.ticker);
+      const v = byTicker.get(target.ticker);
+      const verdict: NewsVerdict = v
+        ? { level: v.level, recurring: v.recurring, summary: v.summary, themes: v.themes.slice(0, 3), headlines, cached: false }
+        : { level: "neutral", recurring: false, summary: "A IA não classificou este ativo.", themes: [], headlines, cached: false };
+      news[key] = verdict;
+      if (v) fresh.set(key, verdict);
+    }
+  }
+  if (fresh.size > 0) await saveVerdicts(admin, fresh);
+  state.news = news;
+}
+
+async function stepNews(supabase: SupabaseClient, state: RunState) {
+  const prepared = state.prepared;
+  if (!prepared) throw new Error("Etapa de preparação não concluída.");
+  await classifyNews(supabase, state, prepared.watchlist);
+}
+
+// Modo completo: notícias também dos finalistas (compras, alternativas e
+// substituições). Veredito não neutro vira flag na recomendação.
+async function stepNewsFinalists(supabase: SupabaseClient, state: RunState) {
+  const prepared = state.prepared;
+  if (!prepared) throw new Error("Etapa de preparação não concluída.");
+  const rankings = state.rankings ?? {};
+  const targets: NewsTarget[] = [];
+  for (const cat of prepared.categories) {
+    const r = rankings[cat.slug];
+    if (!r) continue;
+    const market = marketOf(cat.slug);
+    const tickers = new Set([
+      ...r.buys.map((b) => b.ticker),
+      ...r.alternatives.map((a) => a.ticker),
+      ...r.substitutions.map((s) => s.buy),
+    ]);
+    for (const ticker of tickers) {
+      const key = newsKey(market, ticker);
+      if (state.news?.[key] || targets.some((t) => t.market === market && t.ticker === ticker)) continue;
+      const asset = cat.candidates.find((c) => c.ticker === ticker) ?? cat.holdings.find((h) => h.ticker === ticker);
+      targets.push({ ticker, market, name: asset?.name ?? null, categorySlug: cat.slug, categoryName: cat.name, outsideAnalysis: false });
+    }
+  }
+  await classifyNews(supabase, state, targets);
+
+  const news = state.news ?? {};
+  for (const cat of prepared.categories) {
+    const r = rankings[cat.slug];
+    if (!r) continue;
+    const market = marketOf(cat.slug);
+    for (const buy of r.buys) {
+      const v = news[newsKey(market, buy.ticker)];
+      if (!v || v.level === "neutral") continue;
+      const flag = `notícias: ${NEWS_LEVEL_LABEL[v.level]}${v.recurring ? " recorrente" : ""} — ${v.summary}`;
+      if (!buy.flags.some((f) => f.startsWith("notícias:"))) buy.flags.push(flag);
+    }
+  }
+  state.rankings = rankings;
 }
 
 // ---- etapa 2: ranking por categoria (Opus 5) ------------------------------
@@ -451,7 +614,7 @@ async function stepRank(state: RunState, slug: string, mode: "standard" | "full"
   const { data, usage } = await runStructured({
     model: MODELS.rank,
     system: RANKING_SYSTEM,
-    user: buildRankingPrompt(prepared, cat, mode),
+    user: buildRankingPrompt(prepared, cat, mode, state.news ?? {}),
     schema: RankingSchema,
     maxTokens: 12_000,
     effort: "high",
@@ -526,7 +689,7 @@ async function stepNarrative(state: RunState, mode: "standard" | "full") {
   const { text, usage } = await runText({
     model: MODELS.narrative,
     system: NARRATIVE_SYSTEM,
-    user: buildNarrativePrompt(prepared, state.rankings ?? {}, state.shopping, mode),
+    user: buildNarrativePrompt(prepared, state.rankings ?? {}, state.shopping, mode, state.news ?? {}),
     maxTokens: 4_000,
     effort: "medium",
   });
@@ -553,6 +716,7 @@ function buildReport(state: RunState): Record<string, unknown> {
     })),
     skipped: state.prepared?.skipped ?? [],
     shopping: state.shopping ?? null,
+    news: state.news ?? null,
     usage: state.usage,
   };
 }

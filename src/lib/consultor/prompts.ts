@@ -1,5 +1,47 @@
-import type { CompactAsset, CompactHolding, PreparedCategory, PreparedState, ShoppingState } from "./types";
+import type {
+  CompactAsset,
+  CompactHolding,
+  NewsHeadline,
+  NewsTarget,
+  NewsVerdict,
+  PreparedCategory,
+  PreparedState,
+  ShoppingState,
+} from "./types";
 import type { RankingOutput } from "./schemas";
+
+export const NEWS_LEVEL_LABEL: Record<NewsVerdict["level"], string> = {
+  neutral: "neutro",
+  attention: "atenção",
+  concerning: "preocupante",
+};
+
+export const NEWS_SYSTEM = `Você lê manchetes recentes (últimos 6 meses) sobre empresas e fundos de um investidor de longo prazo e classifica o que importa para a tese de investimento. Preço, cotação, "ação sobe/cai", recomendações de analistas e ranking de mais negociadas são ruído: "neutral".
+
+Use "attention" para um sinal isolado mas relevante para a tese: resultado bem pior que o esperado, aumento de dívida, troca de gestão relevante, investigação iniciada, perda de contrato ou cliente importante, mudança regulatória que afeta o negócio, emissão de cotas com desconto (FII), aumento de vacância ou inadimplência (FII).
+
+Use "concerning" só quando o problema é recorrente ou grave a ponto de ameaçar a tese: fraude ou problema de governança, sucessivos prejuízos ou revisões para baixo, endividamento fora de controle, litígio ou sanção que compromete o negócio, vários episódios negativos do mesmo tema no período. recurring = true quando o mesmo tema aparece em várias manchetes de datas diferentes.
+
+summary: 1 a 2 frases em português com o fato que pesou; se for ruído, diga que não há nada relevante. themes: até 3 palavras-chave. Um veredito por ticker, todos os tickers da lista, nunca invente fatos que não estão nas manchetes.`;
+
+export function buildNewsPrompt(
+  entries: { target: NewsTarget; headlines: NewsHeadline[] }[],
+): string {
+  const lines: string[] = [];
+  lines.push(`${entries.length} ativos. Para cada um, as manchetes mais recentes (data · veículo · título).`);
+  for (const { target, headlines } of entries) {
+    lines.push("");
+    lines.push(`### ${target.ticker} — ${target.name ?? "sem nome"} (${target.categoryName}, ${target.market === "BR" ? "Brasil" : "EUA"})`);
+    if (headlines.length === 0) lines.push("(nenhuma manchete encontrada)");
+    for (const h of headlines.slice(0, 15)) {
+      const date = h.publishedAt ? h.publishedAt.slice(0, 10) : "s/ data";
+      lines.push(`- ${date} · ${h.source ?? "?"} · ${h.title}`);
+    }
+  }
+  lines.push("");
+  lines.push("Responda no formato JSON pedido, com um veredito por ticker.");
+  return lines.join("\n");
+}
 
 // Prompts do consultor. O system prompt é estável (vai com cache); o user
 // prompt carrega as tabelas compactas da rodada.
@@ -94,9 +136,12 @@ function header(category: string): string {
   return "ticker\tnome\tsetor\ttipo\tvalor mercado US$ bi\tP/L\tP/VP\tDY %\tROE %\tmargem líq %\tcresc receita 5a %\tcresc EPS 5a %\tdív total/PL\tliq corrente\tEPS anual (recente→antigo)";
 }
 
-function holdingLine(h: CompactHolding, category: string): string {
+function holdingLine(h: CompactHolding, category: string, news?: NewsVerdict): string {
   const cur = h.currency === "USD" ? "US$" : "R$";
-  return `${assetLine(h, category)}\t| posição: ${fmt(h.quantity, 4)} un · preço médio ${cur} ${fmt(h.avgPrice, 2)} · atual ${cur} ${fmt(h.currentPrice, 2)} · resultado ${fmt(h.gainPct)}% · R$ ${fmt(h.valueBrl, 0)} · ${fmt(h.weightPct)}% da caixa${h.heldButFailing ? ` · atenção: ${h.heldButFailing}` : ""}${h.flags.length ? ` · ${h.flags.join("; ")}` : ""}`;
+  const newsPart = news
+    ? ` · notícias 6m: ${NEWS_LEVEL_LABEL[news.level]}${news.recurring ? " (recorrente)" : ""} — ${news.summary}`
+    : "";
+  return `${assetLine(h, category)}\t| posição: ${fmt(h.quantity, 4)} un · preço médio ${cur} ${fmt(h.avgPrice, 2)} · atual ${cur} ${fmt(h.currentPrice, 2)} · resultado ${fmt(h.gainPct)}% · R$ ${fmt(h.valueBrl, 0)} · ${fmt(h.weightPct)}% da caixa${h.heldButFailing ? ` · atenção: ${h.heldButFailing}` : ""}${h.flags.length ? ` · ${h.flags.join("; ")}` : ""}${newsPart}`;
 }
 
 const CATEGORY_HINT: Record<string, string> = {
@@ -106,7 +151,13 @@ const CATEGORY_HINT: Record<string, string> = {
   internacional: "Internacional fora dos EUA (ETFs ex-EUA e ADRs listados nos EUA, em dólar).",
 };
 
-export function buildRankingPrompt(prepared: PreparedState, cat: PreparedCategory, mode: "standard" | "full"): string {
+export function buildRankingPrompt(
+  prepared: PreparedState,
+  cat: PreparedCategory,
+  mode: "standard" | "full",
+  news: Record<string, NewsVerdict> = {},
+): string {
+  const market = cat.slug === "acoes_br" || cat.slug === "fiis" ? "BR" : "US";
   const newSlots = cat.capLeft == null ? cat.globalCapLeft : Math.min(cat.capLeft, cat.globalCapLeft);
   const maxBuys = Math.max(1, Math.min(6, cat.candidates.length + cat.holdings.length));
   const lines: string[] = [];
@@ -126,7 +177,8 @@ export function buildRankingPrompt(prepared: PreparedState, cat: PreparedCategor
   if (cat.holdings.length === 0) lines.push("(nenhuma)");
   else {
     lines.push(header(cat.slug));
-    for (const h of cat.holdings) lines.push(holdingLine(h, cat.slug));
+    for (const h of cat.holdings) lines.push(holdingLine(h, cat.slug, news[`${market}:${h.ticker}`]));
+    lines.push("(o veredito de notícias vem de uma leitura das manchetes dos últimos 6 meses; pese junto com os fundamentos ao decidir keep/watch/trim/sell)");
   }
   lines.push("");
   lines.push(
@@ -147,6 +199,7 @@ export function buildNarrativePrompt(
   rankings: Record<string, RankingOutput>,
   shopping: ShoppingState,
   mode: "standard" | "full",
+  news: Record<string, NewsVerdict> = {},
 ): string {
   const l1 = prepared.level1;
   const lines: string[] = [];
@@ -184,6 +237,15 @@ export function buildNarrativePrompt(
     for (const s of sales) lines.push(`- ${s.type === "sell" ? "vender" : "reduzir"} ${s.ticker}: R$ ${(s.amountBrl ?? 0).toFixed(2)} — ${s.rationale}${s.taxNote ? ` (${s.taxNote})` : ""}`);
   }
   if (shopping.notes.length > 0) lines.push(`Observações: ${shopping.notes.join(" ")}`);
+  const alerts = (prepared.watchlist ?? [])
+    .map((t) => ({ t, v: news[`${t.market}:${t.ticker}`] }))
+    .filter(({ v }) => v && v.level !== "neutral");
+  if (alerts.length > 0) {
+    lines.push("Alertas de notícias (últimos 6 meses):");
+    for (const { t, v } of alerts) {
+      lines.push(`- ${t.ticker} (${t.categoryName}${t.outsideAnalysis ? ", fora das caixas analisadas" : ""}): ${NEWS_LEVEL_LABEL[v!.level]}${v!.recurring ? ", recorrente" : ""} — ${v!.summary}`);
+    }
+  }
   lines.push("");
   lines.push("Escreva o relatório.");
   return lines.join("\n");

@@ -260,23 +260,14 @@ analysis_recommendations
   status ('pending' | 'executed' | 'partial' | 'ignored'), status_source ('auto' | 'manual'), created_at, resolved_at
 ```
 
-Proposto para as próximas entregas:
+Implementado na migração 0011 (`supabase/migrations/0011_news_cache.sql`):
 
 ```
 news_cache
-  id, ticker text, source, title, url, published_at, snippet, fetched_at
-
-analysis_runs
-  id, user_id, status ('queued' | 'running' | 'done' | 'failed'), mode, step text, progress int,
-  contribution_amount numeric, fx_rate numeric, report jsonb, tokens_in, tokens_out, cost_usd,
-  error text, created_at, finished_at
-
-analysis_recommendations
-  id, run_id, type ('buy' | 'sell' | 'trim' | 'watch'), ticker text, instrument_id null, category_id,
-  quantity numeric, amount numeric, rationale text, option_group int,
-  status ('pending' | 'executed' | 'partial' | 'ignored'), status_source ('auto' | 'manual'),
-  created_at, resolved_at
+  market, ticker, items jsonb (manchetes), fetched_at, verdict jsonb, verdict_at — pk (market, ticker)
 ```
+
+Pendente (entrega 7): tabelas da ingestão CVM (DFP/ITR) para histórico plurianual de lucro e dívida.
 
 RLS igual às demais tabelas: `user_id = auth.uid()`. Caches são leitura pública para autenticados, como `market_instruments`.
 
@@ -307,7 +298,13 @@ Cron de preços passa a buscar cotações EUA (Finnhub) e PTAX diária.
    - Modo padrão analisa só categorias com aporte; completo analisa as quatro selecionáveis. Renda fixa, cripto e categorias personalizadas só recebem o valor.
    - Página `/consultor/analise/[id]`: andamento com barra, depois relatório: alocação vs meta, lista de compras consolidada, alertas (reduzir/vender/observar/substituir com nota de imposto), por categoria as posições revisadas e alternativas, texto do relatório e custo da rodada.
    - Precisa de `ANTHROPIC_API_KEY` (.env.local e Vercel). Fallbacks server-side de recusa não foram ativados; recusa vira erro com retry.
-5. Notícias + poda + avisos tributários.
+5. **Feita (2026-09-05).** Notícias + poda + avisos tributários.
+   - Migração 0011: `news_cache` (manchetes dos últimos 6 meses por ativo + veredito da IA, ambos com validade de 7 dias).
+   - Fontes: Google News RSS com operador `when:180d` (sem chave; PT-BR para B3, EN para EUA; consulta por ticker e nome curto da empresa) e Brave News quando `BRAVE_API_KEY` existir. Adaptadores em `src/lib/news/`.
+   - Etapa `news` roda antes do ranking: manchetes de TODAS as posições com ticker nas categorias selecionáveis (mesmo fora das caixas analisadas), classificadas numa chamada Sonnet 5 em neutro / atenção / preocupante (com `recurring`). O veredito entra na linha da posição no prompt do Opus 5, que decide keep/watch/trim/sell pesando fundamentos e notícias: é a poda da spec. Posições fora das caixas analisadas aparecem como alerta de notícia no relatório.
+   - Modo completo acrescenta `news_finalists` depois do ranking: notícias das compras, alternativas e substituições; veredito não neutro vira flag na recomendação.
+   - Vereditos com menos de 7 dias são reaproveitados do cache sem chamar a IA. Custo medido: ~US$ 0,01 por 2 ativos com 12 manchetes cada.
+   - Avisos tributários já vinham da entrega 4 (nota por venda/redução).
 6. Histórico, detecção de recomendações acatadas, contexto da rodada anterior.
 7. Ingestão CVM DFP/ITR para histórico plurianual de lucro e dívida.
 
