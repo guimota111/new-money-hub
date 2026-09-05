@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/supabase/session";
 import { Header } from "@/components/header";
+import { StatTile } from "@/components/stat-tile";
 import { AllocationBar } from "@/components/charts/allocation-bar";
 import { EvolutionChart, type EvolutionPoint } from "@/components/charts/evolution-chart";
 import {
@@ -25,32 +26,6 @@ const PASSIVE_SLUGS = [
   "rendimento_fii",
   "rendimento_renda_fixa",
 ];
-
-function StatTile({
-  label,
-  value,
-  hint,
-  tone,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "positive" | "negative";
-}) {
-  const valueClass =
-    tone === "positive"
-      ? "text-emerald-700 dark:text-emerald-400"
-      : tone === "negative"
-        ? "text-red-700 dark:text-red-400"
-        : "text-zinc-950 dark:text-zinc-50";
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-sm text-zinc-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${valueClass}`}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-zinc-500">{hint}</p>}
-    </div>
-  );
-}
 
 export default async function Home({
   searchParams,

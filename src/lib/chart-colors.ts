@@ -29,6 +29,22 @@ export const EXPENSE_COLOR: Record<string, string> = {
   outros: "var(--series-8)",
 };
 
+// Categorias do Consultor de Alocação: slots fixos para as padrão (Renda Fixa e
+// FIIs repetem a cor da classe correspondente); as criadas pelo usuário caem
+// no hash de colorForSlug.
+export const ALLOCATION_COLOR: Record<string, string> = {
+  acoes_br: "var(--series-1)",
+  fiis: "var(--series-2)",
+  renda_fixa: "var(--series-3)",
+  acoes_eua: "var(--series-7)",
+  internacional: "var(--series-6)",
+  cripto: "var(--series-5)",
+};
+
+export function allocationColor(slug: string): string {
+  return ALLOCATION_COLOR[slug] ?? colorForSlug(slug);
+}
+
 // A ordem dos slots é o mecanismo validado contra daltonismo — fatias de
 // pizza/donut devem ser renderizadas nesta ordem fixa, nunca por valor.
 export function slotIndex(color: string): number {

@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/months", label: "Meses" },
   { href: "/years", label: "Anos" },
   { href: "/assets", label: "Ativos" },
+  { href: "/consultor", label: "Consultor" },
   { href: "/movements", label: "Movimentações" },
   { href: "/incomes", label: "Receitas" },
   { href: "/expenses", label: "Despesas" },

@@ -17,6 +17,13 @@ export function formatBRL(value: number): string {
   }).format(value);
 }
 
+export function formatPercent(value: number, digits = 1): string {
+  return `${new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value)}%`;
+}
+
 export function formatQuantity(value: number, maxDecimals = 8): string {
   return new Intl.NumberFormat("pt-BR", {
     maximumFractionDigits: maxDecimals,
